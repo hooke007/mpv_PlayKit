@@ -185,6 +185,31 @@ local function delete_dir(path)
 	return run_subprocess( OPERATING_SYSTEM == OS_WIN and {'cmd', '/e:on', '/c', 'rd', '/s', '/q', path} or {'rm', '-r', path} )
 end
 
+local function delete_file(path)
+	if not file_exists(path) then return end
+	msg.warn('Deleting File:', path)
+	return os.remove(path)
+end
+
+local function add_lock(path)
+	msg.debug('Add file lock to:', path)
+	local file = io.open(join_paths(path, tostring(utils.getpid())), 'w')
+	if file then 
+		file:close()
+		return true
+	end
+	return false
+end
+
+local function remove_lock(path)
+	msg.debug('Remove file lock from:', path)
+	return delete_file(join_paths(path, tostring(utils.getpid())))
+end
+
+local function is_locked(path)
+	return #utils.readdir(path,'files') ~= 0
+end
+
 
 --------------------
 -- Data Structure --
@@ -424,6 +449,7 @@ end
 local stop_conditions
 
 local worker_script_path
+local auto_delete = nil
 
 local function create_workers()
 	local workers_requested = (state and state.max_workers) and state.max_workers or user_opts.max_workers
@@ -473,6 +499,12 @@ local function create_ouput_dir(filepath, filename, dimension, rotate)
 		return {basepath = nil, fullpath = nil}
 	end
 	msg.debug('Creating Output Dir: Using ', name)
+	
+	if auto_delete == nil then auto_delete = user_opts.auto_delete end
+	if auto_delete > 0 then 
+		add_lock(user_opts.cache_dir)
+		add_lock(basepath)
+	end
 	
 	local fullpath = join_paths(basepath, dimension, rotate)
 	if not create_dir(fullpath) then return { basepath = nil, fullpath = nil } end
@@ -633,15 +665,18 @@ local function is_thumbnailable()
 	return true
 end
 
-local auto_delete = nil
-
 local function delete_cache_dir()
 	if auto_delete == nil then auto_delete = user_opts.auto_delete end
 	if auto_delete > 0 then 
 		local path = user_opts.cache_dir
-		msg.debug('Clearing Cache on Shutdown:', path)
-		if path:len() < 16 then return end
-		delete_dir(path)
+		remove_lock(path)
+		if not is_locked(path) then 
+			msg.debug('Clearing Cache on Shutdown:', path)
+			if path:len() < 16 then return end
+			delete_dir(path)
+		else
+			msg.debug('Clearing Cache on Shutdown:ignore ', path, '- Locked')
+		end
 	end
 end
 
@@ -650,9 +685,16 @@ local function delete_cache_subdir()
 	if auto_delete == nil then auto_delete = user_opts.auto_delete end
 	if auto_delete == 1 then
 		local path = state.cache_dir_base
-		msg.debug('Clearing Cache for File:', path)
-		if path:len() < 16 then return end
-		delete_dir(path)
+		remove_lock(path)
+		if not is_locked(path) then 
+			msg.debug('Clearing Cache for File:', path)
+			if path:len() < 16 then return end
+			delete_dir(path)
+		else
+			msg.debug('Clearing Cache for File:ignore ', path, '- Locked')
+		end
+	elseif  auto_delete == 2 then
+		remove_lock(state.cache_dir_base)
 	end
 end
 
