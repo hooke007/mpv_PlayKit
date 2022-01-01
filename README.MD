@@ -1,3 +1,4 @@
+[RUSSIAN](./README-RU.md)
 # mpv播放器折腾记录
 
 从萌新到大白，<s>用前嫌麻烦</s> 用后真香
