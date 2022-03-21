@@ -56,7 +56,7 @@ end
 -- Edition menu functions
 local function enableEdition()
     local editionState = false
-    if (propNative("edition-list/count") < 1) then editionState = true end
+    if (propNative("edition-list/count") ~= nil and propNative("edition-list/count") < 1) then editionState = true end
     return editionState
 end
 
@@ -79,7 +79,7 @@ local function editionMenu()
             table.insert(editionMenuVal, {RADIO, editionTitle, "", editionCommand, function() return checkEdition(editionNum) end, false})
         end
     else
-        if (editionNum == 0) then table.insert(editionMenuVal, {SEP}) end
+        table.insert(editionMenuVal, {COMMAND, "No Editions", "", "", "", true})
     end
 
     return editionMenuVal
@@ -88,7 +88,7 @@ end
 -- Chapter menu functions
 local function enableChapter()
     local chapterEnable = false
-    if (propNative("chapter-list/count") < 1) then chapterEnable = true end
+    if (propNative("chapter-list/count") ~= nil and propNative("chapter-list/count") < 1) then chapterEnable = true end
     return chapterEnable
 end
 
