@@ -76,10 +76,10 @@ local function editionMenu()
             if not (editionTitle) then editionTitle = "Edition " .. (editionNum + 1) end
 
             local editionCommand = "set edition " .. editionNum
-            table.insert(editionMenuVal, {RADIO, editionTitle, "", editionCommand, function() return checkEdition(editionNum) end, false, true})
+            table.insert(editionMenuVal, {RADIO, editionTitle, "", editionCommand, function() return checkEdition(editionNum) end, false})
         end
     else
-        table.insert(editionMenuVal, {COMMAND, "No Editions", "", "", "", true})
+        if (editionNum == 0) then table.insert(editionMenuVal, {SEP}) end
     end
 
     return editionMenuVal
@@ -592,7 +592,7 @@ mp.register_event("file-loaded", function()
             {COMMAND, "下一帧", "", "frame-step", "", false, true},
             {COMMAND, "后退10秒", "", "seek -10", "", false, true},
             {COMMAND, "前进10秒", "", "seek 10", "", false, true},
---            {CASCADE, "Title/Edition", "edition_menu", "", "", function() return enableEdition() end},
+            {CASCADE, "版本（Edition）", "edition_menu", "", "", function() return enableEdition() end},
             {CASCADE, "章节", "chapter_menu", "", "", function() return enableChapter() end},
         },
 
