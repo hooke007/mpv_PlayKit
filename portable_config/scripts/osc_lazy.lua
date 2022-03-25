@@ -1998,10 +1998,14 @@ layouts["bottombox"] = function ()
         {x = posX - (bigbtndist * 3), y = bigbtnrowY, an = 5, w = 25, h = 25}
     lo.style = osc_styles.bb_bigButton3
 
+    if (osc_param.display_aspect < 1) then lo.geometry.x = 150 end
+
     lo = add_layout("pl_next")
     lo.geometry =
         {x = posX + (bigbtndist * 3), y = bigbtnrowY, an = 5, w = 25, h = 25}
     lo.style = osc_styles.bb_bigButton3
+
+    if (osc_param.display_aspect < 1) then lo.geometry.x = osc_geo.w - 150 end
 
     -- 快捷按钮
 
@@ -2009,6 +2013,8 @@ layouts["bottombox"] = function ()
     lo.geometry =
         {x = posX - pos_offsetX + 40, y = bigbtnrowY, an = 5, w = 70, h = 25}
     lo.style = osc_styles.bb_Atracks
+
+    if (osc_param.display_aspect < 1) then lo.geometry.x = 40 end
 
     lo = add_layout("cy_sub")
     lo.geometry =
@@ -2025,12 +2031,16 @@ layouts["bottombox"] = function ()
         {x = posX + pos_offsetX - (30 * 2) - osc_geo.p, y = bigbtnrowY, an = 4, w = 25, h = 25}
     lo.style = osc_styles.bb_volume
 
+    if (osc_param.display_aspect < 1) then lo.geometry.x = osc_geo.w - 40 end
+
     -- 联动内置的stats.lua
 
     lo = add_layout("lua_stats")
     lo.geometry =
         {x = posX + pos_offsetX - (45 * 2) - osc_geo.p, y = bigbtnrowY + 2, an = 5, w = 25, h = 25}
     lo.style = osc_styles.bb_lua_stats
+
+    if (osc_param.display_aspect < 1) then lo.geometry.x = osc_geo.w - 60 end
 
     --
     -- 进度条
@@ -2514,6 +2524,7 @@ function osc_init()
 
     -- sub_title -- bottombox的右侧子标题
     ne = new_element("sub_title", "button")
+    ne.visible = (osc_param.display_aspect > 1)
 
     ne.content = function ()
         local title = state.forced_sub_title or
@@ -2577,6 +2588,7 @@ function osc_init()
 
     --skipback
     ne = new_element("skipback", "button")
+    ne.visible = (osc_param.display_aspect > 1)
 
     ne.softrepeat = true
     ne.content = "\238\128\132"
@@ -2589,6 +2601,7 @@ function osc_init()
 
     --skipfrwd
     ne = new_element("skipfrwd", "button")
+    ne.visible = (osc_param.display_aspect > 1)
 
     ne.softrepeat = true
     ne.content = "\238\128\133"
@@ -2601,6 +2614,7 @@ function osc_init()
 
     --ch_prev
     ne = new_element("ch_prev", "button")
+    ne.visible = (osc_param.display_aspect > 1)
 
     ne.enabled = have_ch
     ne.content = "\238\132\132"
@@ -2618,6 +2632,7 @@ function osc_init()
 
     --ch_next
     ne = new_element("ch_next", "button")
+    ne.visible = (osc_param.display_aspect > 1)
 
     ne.enabled = have_ch
     ne.content = "\238\132\133"
@@ -2663,6 +2678,7 @@ function osc_init()
 
     --cy_sub --全局字幕按钮增强
     ne = new_element("cy_sub", "button")
+    ne.visible = (osc_param.display_aspect > 1)
 
     ne.enabled = (#tracks_osc.sub > 0)
     ne.off = (get_track('sub') == 0)
@@ -2688,6 +2704,8 @@ function osc_init()
 
     --tog_fs
     ne = new_element("tog_fs", "button")
+    ne.visible = (osc_param.display_aspect > 1)
+
     ne.content = function ()
         if (state.fullscreen) then
             return ("\238\132\137")
