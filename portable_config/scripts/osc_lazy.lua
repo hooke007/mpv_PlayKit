@@ -85,6 +85,9 @@ local user_opts = {
     sub_title = " ",                    -- bottombox布局的右侧子标题
     sub_title2 = "对比[${contrast}]  明度[${brightness}]  伽马[${gamma}]  饱和[${saturation}]  色相[${hue}]",
                                         -- bottombox布局的临时右侧子标题
+    showonpause = false,                -- 在暂停时显示 OSC
+    showonstart = false,                -- 在播放开始或当播放下一个文件时显示 OSC
+    showonseek = false,                 -- 在跳转时显示 OSC
     font = "sans",                      -- OSC的全局字体显示
     font_mono = "sans",
     font_bold = 500,
@@ -634,6 +637,7 @@ local state = {
     maximized = false,
     osd = mp.create_osd_overlay("ass-events"),
     chapter_list = {},                      -- sorted by time
+    lastvisibility = user_opts.visibility,  -- save last visibility on pause if showonpause
 }
 
 local window_control_box_width = 80
@@ -2977,6 +2981,16 @@ function osc_visible(visible)
 end
 
 function pause_state(name, enabled)
+    mp.add_timeout(0.1, function() state.osd:update() end)
+    if user_opts.showonpause then
+        if enabled then
+            state.lastvisibility = user_opts.visibility
+            visibility_mode("always", true)
+            show_osc()
+        else
+            visibility_mode(state.lastvisibility, true)
+        end
+    end
     state.paused = enabled
     request_tick()
 end
@@ -3426,6 +3440,8 @@ update_duration_watch()
 
 mp.register_event("shutdown", shutdown)
 mp.register_event("start-file", request_init)
+if user_opts.showonstart then mp.register_event("file-loaded", show_osc) end
+if user_opts.showonseek then mp.register_event("seek", show_osc) end
 mp.observe_property("track-list", nil, request_init)
 mp.observe_property("playlist", nil, request_init)
 mp.observe_property("chapter-list", "native", function(_, list)
