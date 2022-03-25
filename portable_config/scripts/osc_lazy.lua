@@ -1953,6 +1953,7 @@ layouts["bottombox"] = function ()
     lo.geometry = {x = posX, y = titlerowY, an = 5, w = 500, h = 18}
     lo.style = osc_styles.bb_downtitle
     lo.button.maxchars = user_opts.boxmaxchars
+    if (osc_param.display_aspect < 1) then lo.button.maxchars = 50 end
 
     -- 右侧子标题
 
