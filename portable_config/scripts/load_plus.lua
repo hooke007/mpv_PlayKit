@@ -402,19 +402,25 @@ function append_vfSub()
 	end
 end
 
+local function filter_state(label, key, value)
+    local filters = mp.get_property_native("vf")
+    for _, filter in pairs(filters) do
+        if filter["label"] == label and (not key or key and filter[key] == value) then return true end
+    end
+    return false
+end
+
 function toggle_vfSub()
 	local vfSub = "vf toggle @LUA-load_plus"
-	mp.command(vfSub)
+	if filter_state("LUA-load_plus") then mp.command(vfSub) end
 end
 
 function remove_vfSub()
 	local vfSub = "vf remove @LUA-load_plus"
-	mp.command(vfSub)
+	if filter_state("LUA-load_plus") then mp.command(vfSub) end
 end
 
-mp.register_event("file-loaded", function()
-	if mp.get_property("vf") ~= "" then mp.command("vf remove @LUA-load_plus") end
-end)
+mp.register_event("file-loaded", remove_vfSub)
 
 mp.register_event("start-file", find_and_add_entries)
 
