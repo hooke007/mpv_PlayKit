@@ -21,7 +21,7 @@ Discussions [**💬Discussions 🗨️**](../../discussions)
 
 mpv.net（powered by the chinese version of libmpv) which is easy to use。Not only covering the features of MPV-Lazy, it is also paired with a user-friendly
 graphical interface，for the normal user。  
-传送门 [mpv.net_CM](https://github.com/hooke007/mpv.net_CM)
+ [mpv.net_CM](https://github.com/hooke007/mpv.net_CM)
 
 ## Screenshots
 
