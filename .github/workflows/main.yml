@@ -1,0 +1,29 @@
+name: Pack_MPV_lazy
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: pack
+      run: |
+        chmod +x ./action/pack.sh
+        ./action/pack.sh        \
+            "action/pack.ini"   \
+            ${{ inputs.debug }} \
+            ${{ secrets.GITHUB_TOKEN }}
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: ${{ env.artifact_name }}
+        path: ${{ env.pack_dir }}
