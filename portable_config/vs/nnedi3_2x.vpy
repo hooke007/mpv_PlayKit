@@ -3,23 +3,23 @@
 
 import vapoursynth as vs
 from vapoursynth import core
-from nnedi3_resample import nnedi3_resample
+from k7sfunc import NNEDI3_STD
 
-input = video_in
+clip = video_in
 
 ############
 # 用户选项 #
 ############
 
-Edi_nsize = 4
-Edi_nns = 3
-CPU = True
-GPU = -1
-## 0： 8x6 // 4： 8x4
-## 2： 64  // 3： 128  // 4： 256
+Edi_Nsize = 4
+Edi_Nns = 3
+Cpu = True
+Gpu = -1
+## <0|4> 分别对应 8x6 8x4
+## <2|3|4> 分别对应 64 128 256
 ## 使用cpu还是gpu
-## 使用gpu时指定的显卡序号
+## 使用gpu时指定的显卡序号，-1为自动，0为排序一号
 
-output = nnedi3_resample(input=input, target_width=input.width * 2, target_height=input.height * 2, nsize=Edi_nsize, nns=Edi_nns, mode="znedi3" if CPU else "nnedi3cl", device=GPU)
+clip = NNEDI3_STD(clip, edi_nsize=Edi_Nsize, edi_nns=Edi_Nns, cpu=Cpu, gpu=Gpu)
 
-output.set_output()
+clip.set_output()

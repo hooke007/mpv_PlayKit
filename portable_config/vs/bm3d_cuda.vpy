@@ -2,28 +2,23 @@
 
 import vapoursynth as vs
 from vapoursynth import core
+from k7sfunc import BM3D_NV
 
-input = video_in
-fmt_in = input.format.id
+clip = video_in
 
 ############
 # 用户选项 #
 ############
 
-Denoise_lv = [5,1,1]
-Ref_bs = 8
-Cut_bs = 7
-GPU = 0
+Nr_Lv = [5,1,1]
+Bs_Ref = 8
+Bs_Out = 7
+Gpu = 0
 ## 每平面的降噪强度
-## block_step 1-8
-## 小于等于 Ref_bs
+## <1|2|3|4|5|6|7|8> block_step
+## <1|2|3|4|5|6|7|8> 小于等于 Bs_Ref
 ## 显卡序号，0为一号
 
-cut0 = core.resize.Bilinear(clip=input, format=vs.YUV444PS)
+clip = BM3D_NV(clip, nr_lv=Nr_Lv, bs_ref=Bs_Ref, bs_out=Bs_Out, gpu=Gpu)
 
-ref = core.bm3dcuda_rtc.BM3D(clip=cut0, sigma=Denoise_lv, block_step=Ref_bs, device_id=GPU)
-cut1 = core.bm3dcuda_rtc.BM3D(clip=cut0, ref=ref, sigma=Denoise_lv, block_step=Cut_bs, device_id=GPU)
-
-output = core.resize.Bilinear(clip=cut1, format=fmt_in)
-
-output.set_output()
+clip.set_output()
