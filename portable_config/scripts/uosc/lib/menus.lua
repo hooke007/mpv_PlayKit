@@ -77,7 +77,7 @@ function create_select_tracklist_type_menu_opener(menu_title, track_type, track_
 
 		if load_command then
 			items[#items + 1] = {
-				title = '导入', bold = true, italic = true, hint = '打开文件', value = '{load}', separator = true,
+				title = lang._submenu_import, bold = true, italic = true, hint = lang._submenu_load_file, value = '{load}', separator = true,
 			}
 		end
 
@@ -91,7 +91,7 @@ function create_select_tracklist_type_menu_opener(menu_title, track_type, track_
 		-- If I'm mistaken and there is an active need for this, feel free to
 		-- open an issue.
 		if track_type == 'sub' or track_type == 'audio' or track_type == 'video' then
-			disabled_item = {title = '禁用', italic = true, muted = true, hint = '—', value = nil, active = true}
+			disabled_item = {title = lang._submenu_id_disabled, italic = true, muted = true, hint = '—', value = nil, active = true}
 			items[#items + 1] = disabled_item
 		end
 
@@ -108,12 +108,12 @@ function create_select_tracklist_type_menu_opener(menu_title, track_type, track_
 				h(track.codec)
 				if track['audio-channels'] then h(track['audio-channels'] .. ' channels') end
 				if track['demux-samplerate'] then h(string.format('%.3gkHz', track['demux-samplerate'] / 1000)) end
-				if track.forced then h('强制') end
-				if track.default then h('默认') end
-				if track.external then h('外挂') end
+				if track.forced then h(lang._submenu_id_forced) end
+				if track.default then h(lang._submenu_id_default) end
+				if track.external then h(lang._submenu_id_external) end
 
 				items[#items + 1] = {
-					title = (track.title and track.title or '轨道 ' .. track.id),
+					title = (track.title and track.title or lang._submenu_id_title .. track.id),
 					hint = table.concat(hint_values, ', '),
 					value = track.id,
 					active = track.selected,
@@ -181,10 +181,10 @@ function open_file_navigation_menu(directory_path, handle_select, opts)
 
 	if is_root then
 		if state.platform == 'windows' then
-			items[#items + 1] = {title = '..', hint = '驱动器列表', value = '{drives}', separator = true}
+			items[#items + 1] = {title = '..', hint = lang._submenu_file_browser_title, value = '{drives}', separator = true}
 		end
 	else
-		items[#items + 1] = {title = '..', hint = '上级目录', value = directory.dirname, separator = true}
+		items[#items + 1] = {title = '..', hint = lang._submenu_file_browser_item_title, value = directory.dirname, separator = true}
 	end
 
 	local back_path = items[#items] and items[#items].value
@@ -276,7 +276,7 @@ function open_drives_menu(handle_select, opts)
 			if drive then
 				local drive_path = normalize_path(drive)
 				items[#items + 1] = {
-					title = drive, hint = '盘符', value = drive_path, active = opts.active_path == drive_path,
+					title = drive, hint = lang._submenu_file_browser_item2_title, value = drive_path, active = opts.active_path == drive_path,
 				}
 				if opts.selected_path == drive_path then selected_index = #items end
 			end
@@ -286,7 +286,7 @@ function open_drives_menu(handle_select, opts)
 	end
 
 	return Menu:open(
-		{type = opts.type, title = opts.title or '驱动器列表', items = items, selected_index = selected_index},
+		{type = opts.type, title = opts.title or lang._submenu_file_browser_item3_title, items = items, selected_index = selected_index},
 		handle_select
 	)
 end

@@ -16,6 +16,7 @@ msg = require('mp.msg')
 osd = mp.create_osd_overlay('ass-events')
 INFINITY = 1e309
 QUARTER_PI_SIN = math.sin(math.pi / 4)
+require('lib/lang')
 
 --[[ OPTIONS ]]
 
@@ -150,39 +151,39 @@ end
 -- 上下文菜单的默认内容
 local function create_default_menu()
 	return {
-		{title = '加载', items = {
-			{title = '※ 文件浏览器', value = 'script-binding uosc/open-file'},
-			{title = '※ 导入 字幕轨', value = 'script-binding uosc/load-subtitles'},
+		{title = lang._load, items = {
+			{title = lang._file_browser, value = 'script-binding uosc/open-file'},
+			{title = lang._import_sid, value = 'script-binding uosc/load-subtitles'},
 		},},
-		{title = '导航', items = {
-			{title = '※ 播放列表', value = 'script-binding uosc/playlist'},
-			{title = '※ 版本列表', value = 'script-binding uosc/editions'},
-			{title = '※ 章节列表', value = 'script-binding uosc/chapters'},
-			{title = '※ 视频轨列表', value = 'script-binding uosc/video'},
-			{title = '※ 音频轨列表', value = 'script-binding uosc/audio'},
-			{title = '※ 字幕轨列表', value = 'script-binding uosc/subtitles'},
-			{title = '播放列表乱序重排', value = 'playlist-shuffle'},
+		{title = lang._navigation, items = {
+			{title = lang._playlist, value = 'script-binding uosc/playlist'},
+			{title = lang._edition_list, value = 'script-binding uosc/editions'},
+			{title = lang._chapter_list, value = 'script-binding uosc/chapters'},
+			{title = lang._vid_list, value = 'script-binding uosc/video'},
+			{title = lang._aid_list, value = 'script-binding uosc/audio'},
+			{title = lang._sid_list, value = 'script-binding uosc/subtitles'},
+			{title = lang._playlist_shuffle, value = 'playlist-shuffle'},
 		},},
-		{title = '※ 截屏', value = 'script-binding uosc/shot'},
-		{title = '视频', items = {
-			{title = '切换 解码模式', value = 'cycle-values hwdec no auto auto-copy'},
-			{title = '切换 去色带状态', value = 'cycle deband'},
-			{title = '切换 去隔行状态', value = 'cycle deinterlace'},
-			{title = '切换 自动校色', value = 'cycle icc-profile-auto'},
-			{title = '切换 时间码解析模式', value = 'cycle correct-pts'},
+		{title = lang._ushot, value = 'script-binding uosc/shot'},
+		{title = lang._VIDEO, items = {
+			{title = lang._decoding_api, value = 'cycle-values hwdec no auto auto-copy'},
+			{title = lang._deband_toggle, value = 'cycle deband'},
+			{title = lang._deint_toggle, value = 'cycle deinterlace'},
+			{title = lang._icc_toggle, value = 'cycle icc-profile-auto'},
+			{title = lang._corpts_toggle, value = 'cycle correct-pts'},
 		},},
-		{title = '工具', items = {
-			{title = '开关 常驻统计信息', value = 'script-binding display-stats-toggle'},
-			{title = '显示控制台', value = 'script-binding console/enable'},
-			{title = '切换 窗口边框', value = 'cycle border'},
-			{title = '切换 窗口置顶', value = 'cycle ontop'},
-			{title = '※ 音频输出设备列表', value = 'script-binding uosc/audio-device'},
-			{title = '※ 流式传输品质', value = 'script-binding uosc/stream-quality'},
-			{title = '※ 打开 当前文件所在路径', value = 'script-binding uosc/show-in-directory'},
-			{title = '※ 打开 设置目录', value = 'script-binding uosc/open-config-directory'},
+		{title = lang._TOOLS, items = {
+			{title = lang._stats_toggle, value = 'script-binding display-stats-toggle'},
+			{title = lang._console_on, value = 'script-binding console/enable'},
+			{title = lang._border_toggle, value = 'cycle border'},
+			{title = lang._ontop_toggle, value = 'cycle ontop'},
+			{title = lang._audio_device, value = 'script-binding uosc/audio-device'},
+			{title = lang._stream_quality, value = 'script-binding uosc/stream-quality'},
+			{title = lang._show_file_dir, value = 'script-binding uosc/show-in-directory'},
+			{title = lang._show_config_dir, value = 'script-binding uosc/open-config-directory'},
 		},},
-		{title = '停止', value = 'stop'},
-		{title = '退出mpv', value = 'quit'},
+		{title = lang._stop, value = 'stop'},
+		{title = lang._quit, value = 'quit'},
 	}
 end
 
@@ -934,9 +935,9 @@ bind_command('decide-pause-indicator', function() Elements.pause_indicator:decid
 bind_command('menu', function() toggle_menu_with_items() end)
 bind_command('menu-blurred', function() toggle_menu_with_items({mouse_nav = true}) end)
 local track_loaders = {
-	{name = 'subtitles', hint = '字幕轨', prop = 'sub', allowed_types = itable_join(config.types.video, config.types.subtitle)},
-	{name = 'audio', hint = '音频轨', prop = 'audio', allowed_types = itable_join(config.types.video, config.types.audio)},
-	{name = 'video', hint = '视频轨', prop = 'video', allowed_types = config.types.video},
+	{name = 'subtitles', hint = lang._sid_menu, prop = 'sub', allowed_types = itable_join(config.types.video, config.types.subtitle)},
+	{name = 'audio', hint = lang._aid_menu, prop = 'audio', allowed_types = itable_join(config.types.video, config.types.audio)},
+	{name = 'video', hint = lang._vid_menu, prop = 'video', allowed_types = config.types.video},
 }
 for _, loader in ipairs(track_loaders) do
 	local menu_type = 'load-' .. loader.name
@@ -958,21 +959,21 @@ for _, loader in ipairs(track_loaders) do
 		open_file_navigation_menu(
 			path,
 			function(path) mp.commandv(loader.prop .. '-add', path) end,
-			{type = menu_type, title = '导入 ' .. loader.hint, allowed_types = loader.allowed_types}
+			{type = menu_type, title = lang._import_id_menu .. loader.hint, allowed_types = loader.allowed_types}
 		)
 	end)
 end
 bind_command('subtitles', create_select_tracklist_type_menu_opener(
-	'字幕轨列表', 'sub', 'sid', 'script-binding uosc/load-subtitles'
+	lang._sid_submenu_title, 'sub', 'sid', 'script-binding uosc/load-subtitles'
 ))
 bind_command('audio', create_select_tracklist_type_menu_opener(
-	'音频轨列表', 'audio', 'aid', 'script-binding uosc/load-audio'
+	lang._aid_submenu_title, 'audio', 'aid', 'script-binding uosc/load-audio'
 ))
 bind_command('video', create_select_tracklist_type_menu_opener(
-	'视频轨列表', 'video', 'vid', 'script-binding uosc/load-video'
+	lang._vid_submenu_title, 'video', 'vid', 'script-binding uosc/load-video'
 ))
 bind_command('playlist', create_self_updating_menu_opener({
-	title = '播放列表',
+	title = lang._playlist_submenu_title,
 	type = 'playlist',
 	list_prop = 'playlist',
 	serializer = function(playlist)
@@ -996,7 +997,7 @@ bind_command('playlist', create_self_updating_menu_opener({
 	on_delete_item = function(index) mp.commandv('playlist-remove', tostring(index - 1)) end,
 }))
 bind_command('chapters', create_self_updating_menu_opener({
-	title = '章节列表',
+	title = lang._chapter_list_submenu_title,
 	type = 'chapters',
 	list_prop = 'chapter-list',
 	active_prop = 'chapter',
@@ -1016,7 +1017,7 @@ bind_command('chapters', create_self_updating_menu_opener({
 	on_select = function(index) mp.commandv('set', 'chapter', tostring(index - 1)) end,
 }))
 bind_command('editions', create_self_updating_menu_opener({
-	title = '版本列表',
+	title = lang._edition_list_submenu_title,
 	type = 'editions',
 	list_prop = 'edition-list',
 	active_prop = 'current-edition',
@@ -1024,7 +1025,7 @@ bind_command('editions', create_self_updating_menu_opener({
 		local items = {}
 		for _, edition in ipairs(editions or {}) do
 			items[#items + 1] = {
-				title = edition.title or '版本',
+				title = edition.title or lang._edition_list_submenu_item_title,
 				hint = tostring(edition.id + 1),
 				value = edition.id,
 				active = edition.id == current_id,
@@ -1062,7 +1063,7 @@ bind_command('stream-quality', function()
 		items[#items + 1] = {title = height .. 'p', value = format, active = format == ytdl_format}
 	end
 
-	Menu:open({type = 'stream-quality', title = '流式传输品质', items = items}, function(format)
+	Menu:open({type = 'stream-quality', title = lang._stream_quality_submenu_title, items = items}, function(format)
 		mp.set_property('ytdl-format', format)
 
 		-- Reload the video to apply new format
@@ -1192,7 +1193,7 @@ bind_command('delete-file-quit', function()
 	mp.command('quit')
 end)
 bind_command('audio-device', create_self_updating_menu_opener({
-	title = '音频输出设备列表',
+	title = lang._audio_device_submenu_title,
 	type = 'audio-device-list',
 	list_prop = 'audio-device-list',
 	active_prop = 'audio-device',
