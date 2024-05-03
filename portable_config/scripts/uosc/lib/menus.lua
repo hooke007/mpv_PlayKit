@@ -126,6 +126,7 @@ function create_select_tracklist_type_menu_opener(menu_title, track_type, track_
 		for _, track in ipairs(tracklist) do
 			if track.type == track_type then
 				local hint_values = {}
+				local selected_by_prop = track.selected and utils.to_string(track.id) == mp.get_property(track_prop)
 				local function h(value) hint_values[#hint_values + 1] = value end
 
 				if track.lang then h(track.lang:upper()) end
@@ -144,10 +145,10 @@ function create_select_tracklist_type_menu_opener(menu_title, track_type, track_
 					title = (track.title and track.title or ulang._submenu_id_title .. track.id),
 					hint = table.concat(hint_values, ', '),
 					value = track.id,
-					active = track.selected,
+					active = selected_by_prop,
 				}
 
-				if track.selected then
+				if selected_by_prop then
 					if disabled_item then disabled_item.active = false end
 					active_index = #items
 				end

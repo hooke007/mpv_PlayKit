@@ -880,6 +880,9 @@ bind_command('load-video', create_track_loader_menu_opener({
 bind_command('subtitles', create_select_tracklist_type_menu_opener(
 	ulang._sid_submenu_title, 'sub', 'sid', 'script-binding uosc/load-subtitles', 'script-binding uosc/download-subtitles'
 ))
+bind_command('secondary-subtitles', create_select_tracklist_type_menu_opener(
+	ulang._sid_secondary_submenu_title, 'sub', 'secondary-sid', 'script-binding uosc/load-subtitles', 'script-binding uosc/download-subtitles'
+))
 bind_command('audio', create_select_tracklist_type_menu_opener(
 	ulang._aid_submenu_title, 'audio', 'aid', 'script-binding uosc/load-audio'
 ))
