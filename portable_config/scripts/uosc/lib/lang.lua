@@ -98,7 +98,7 @@ ulang = {
 	_input_empty = 'input-bindings 为空',
 
 	_sid_submenu_title = '字幕轨列表',
-	_sid_secondary_submenu_title = '次字幕轨列表',
+	_sid_sec_submenu_title = '次字幕轨列表',
 	_aid_submenu_title = '音频轨列表',
 	_vid_submenu_title = '视频轨列表',
 	_playlist_submenu_title = '播放列表',
