@@ -1045,7 +1045,7 @@ local function add_video(s)
     append_hdr(s, ro)
     append_property(s, "video-bitrate", {prefix="码率："})
     append_filters(s, "vf", "视频滤镜链：")
-end
+
 
 
 local function add_audio(s)
