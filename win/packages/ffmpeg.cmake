@@ -86,12 +86,14 @@ ExternalProject_Add(ffmpeg
         --enable-opengl
         --enable-vaapi
         --disable-doc
+        --disable-programs
         --disable-ffplay
         --disable-ffprobe
         --disable-vdpau
         --disable-videotoolbox
         --disable-decoder=libaom_av1
         --disable-muxers
+        --enable-muxer=spdif
         --enable-muxer=avif
         --enable-muxer=image2
         --enable-muxer=webp

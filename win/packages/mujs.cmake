@@ -8,7 +8,7 @@ prefix=${MINGW_INSTALL_PREFIX}
 host=mingw")
 
 ExternalProject_Add(mujs
-    GIT_REPOSITORY https://github.com/ccxvii/mujs.git
+    GIT_REPOSITORY https://codeberg.org/ccxvii/mujs.git
     SOURCE_DIR ${SOURCE_LOCATION}
     GIT_CLONE_FLAGS "--filter=tree:0"
     PATCH_COMMAND ${EXEC} git am --3way ${CMAKE_CURRENT_SOURCE_DIR}/mujs-*.patch
