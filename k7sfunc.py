@@ -189,6 +189,114 @@ import math
 import fractions
 
 ##################################################
+## 通用辅助函数 (Helper Functions)
+##################################################
+
+def _validate_input_node(input, func_name):
+	"""验证输入是否为有效的VideoNode"""
+	if not isinstance(input, vs.VideoNode):
+		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+
+def _validate_bool_param(value, param_name, func_name):
+	"""验证布尔参数"""
+	if not isinstance(value, bool):
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+def _validate_gpu_param(gpu, func_name):
+	"""验证GPU参数"""
+	if gpu not in [-1, 0, 1, 2]:
+		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
+
+def _validate_gpu_param_strict(gpu, func_name):
+	"""验证GPU参数 (严格模式，不包括-1)"""
+	if gpu not in [0, 1, 2]:
+		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
+
+def _validate_vs_t_param(vs_t, func_name):
+	"""验证vs_t参数"""
+	if not isinstance(vs_t, int) or vs_t > vs_thd_init:
+		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+
+def _validate_positive_int(value, param_name, func_name):
+	"""验证正整数参数"""
+	if not isinstance(value, int) or value <= 0:
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+def _validate_non_negative_int(value, param_name, func_name):
+	"""验证非负整数参数"""
+	if not isinstance(value, int) or value < 0:
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+def _validate_float_or_int(value, param_name, func_name):
+	"""验证浮点数或整数参数"""
+	if not isinstance(value, (int, float)):
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+def _check_plugin_dependency(plugin_name, func_name):
+	"""检查插件依赖"""
+	if not hasattr(core, plugin_name):
+		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 {plugin_name}")
+
+def _import_vsmlrt(func_name, min_version="3.15.25"):
+	"""导入vsmlrt模块"""
+	global vsmlrt
+	if vsmlrt is None:
+		try:
+			import vsmlrt
+		except ImportError:
+			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
+	if LooseVersion(vsmlrt.__version__) < LooseVersion(min_version):
+		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 {min_version}")
+
+def _import_nnedi3_resample(func_name, min_version="2"):
+	"""导入nnedi3_resample模块"""
+	global nnedi3_resample
+	if nnedi3_resample is None:
+		try:
+			import nnedi3_resample
+		except ImportError:
+			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 nnedi3_resample")
+	if LooseVersion(nnedi3_resample.__version__) < LooseVersion(min_version):
+		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 nnedi3_resample 的版本号过低，至少 {min_version}")
+
+def _import_qtgmc(func_name, min_version="0.3.0"):
+	"""导入qtgmc模块"""
+	global qtgmc
+	if qtgmc is None:
+		try:
+			import qtgmc
+		except ImportError:
+			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 qtgmc")
+	if LooseVersion(qtgmc.__version__) < LooseVersion(min_version):
+		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 qtgmc 的版本号过低，至少 {min_version}")
+
+def _init_core_threads(vs_t):
+	"""初始化核心线程数"""
+	core.num_threads = vs_t
+
+def _get_color_range(input):
+	"""获取色彩范围"""
+	return getattr(input.get_frame(0).props, "_ColorRange", 0)
+
+def _resolve_model_path(model_pth, plugin_name, func_name):
+	"""解析模型路径"""
+	plg_dir = os.path.dirname(getattr(core, plugin_name).Version()["path"]).decode()
+	mdl_pth_rel = plg_dir + "/models/" + model_pth
+	if not os.path.exists(mdl_pth_rel) and not os.path.exists(model_pth):
+		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
+	return mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
+
+def _check_onnx_model_precision(mdl_pth, func_name):
+	"""检查ONNX模型精度 (Note: calls ONNX_ANZ which is defined later in the file)"""
+	check_mdl = ONNX_ANZ(input=mdl_pth)
+	if check_mdl == 1:
+		return False  # FP32
+	elif check_mdl == 10:
+		return True   # FP16
+	else:
+		raise vs.Error(f"模块 {func_name} 的输入模型的输入精度不受支持")
+
+##################################################
 ## 格式转换 # TODO
 ##################################################
 
@@ -691,25 +799,20 @@ def ACNET_STD(
 ) -> vs.VideoNode :
 
 	func_name = "ACNET_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_node(input, func_name)
 	if model not in [1, 2, 3] :
 		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
 	if model_var not in [0, 1, 2, 3] :
 		raise vs.Error(f"模块 {func_name} 的子参数 model_var 的值无效")
-	if not isinstance(turbo, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 turbo 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
+	_validate_bool_param(turbo, "turbo", func_name)
+	_validate_gpu_param_strict(gpu, func_name)
 	if gpu_m not in [1, 2] :
 		raise vs.Error(f"模块 {func_name} 的子参数 gpu_m 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "anime4kcpp") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 anime4kcpp")
+	_check_plugin_dependency("anime4kcpp", func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	w_in, h_in = input.width, input.height
 	size_in = w_in * h_in
 	fmt_in = input.format.id
@@ -756,25 +859,17 @@ def ARTCNN_NV(
 ) -> vs.VideoNode :
 
 	func_name = "ARTCNN_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(lt_hd, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 lt_hd 的值无效")
+	_validate_input_node(input, func_name)
+	_validate_bool_param(lt_hd, "lt_hd", func_name)
 	if model not in [6, 7, 8] :
 		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_gpu_param_strict(gpu, func_name)
+	_validate_positive_int(gpu_t, "gpu_t", func_name)
+	_validate_bool_param(st_eng, "st_eng", func_name)
+	_validate_non_negative_int(ws_size, "ws_size", func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin_dependency("trt", func_name)
 
 	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
 	mdl_fname = ["ArtCNN_R16F96", "ArtCNN_R8F64", "ArtCNN_R8F64_DS"][[6, 7, 8].index(model)]
@@ -782,16 +877,9 @@ def ARTCNN_NV(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.21.13") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.21.13")
+	_import_vsmlrt(func_name, "3.21.13")
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	w_in, h_in = input.width, input.height
 	size_in = w_in * h_in
 	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
@@ -835,27 +923,19 @@ def CUGAN_NV(
 ) -> vs.VideoNode :
 
 	func_name = "CUGAN_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(lt_hd, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 lt_hd 的值无效")
+	_validate_input_node(input, func_name)
+	_validate_bool_param(lt_hd, "lt_hd", func_name)
 	if nr_lv not in [-1, 0, 3] :
 		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
 	if not isinstance(sharp_lv, (int, float)) or sharp_lv < 0.0 or sharp_lv > 2.0 :
 		raise vs.Error(f"模块 {func_name} 的子参数 sharp_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_gpu_param_strict(gpu, func_name)
+	_validate_positive_int(gpu_t, "gpu_t", func_name)
+	_validate_bool_param(st_eng, "st_eng", func_name)
+	_validate_non_negative_int(ws_size, "ws_size", func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin_dependency("trt", func_name)
 
 	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
 	mdl_fname = ["pro-no-denoise3x-up2x", "pro-conservative-up2x", "pro-denoise3x-up2x"][[-1, 0, 3].index(nr_lv)]
@@ -863,19 +943,12 @@ def CUGAN_NV(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.18.1") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 版本号过低，至少 3.18.1")
+	_import_vsmlrt(func_name, "3.18.1")
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	w_in, h_in = input.width, input.height
 	size_in = w_in * h_in
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	colorlv = _get_color_range(input)
 	fmt_in = input.format.id
 
 	if (not lt_hd and (size_in > 1280 * 720)) or (size_in > 2048 * 1080) :
@@ -910,40 +983,25 @@ def EDI_US_STD(
 ) -> vs.VideoNode :
 
 	func_name = "EDI_US_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(ext_proc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 ext_proc 的值无效")
+	_validate_input_node(input, func_name)
+	_validate_bool_param(ext_proc, "ext_proc", func_name)
 	if nsize not in [0, 4] :
 		raise vs.Error(f"模块 {func_name} 的子参数 nsize 的值无效")
 	if nns not in [2, 3, 4] :
 		raise vs.Error(f"模块 {func_name} 的子参数 nns 的值无效")
-	if not isinstance(cpu, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_bool_param(cpu, "cpu", func_name)
+	_validate_gpu_param(gpu, func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "fmtc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 fmtc")
+	_check_plugin_dependency("fmtc", func_name)
 	if cpu :
-		if not hasattr(core, "znedi3") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 znedi3")
+		_check_plugin_dependency("znedi3", func_name)
 	else :
-		if not hasattr(core, "nnedi3cl") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nnedi3cl")
+		_check_plugin_dependency("nnedi3cl", func_name)
 
-	global nnedi3_resample
-	if nnedi3_resample is None :
-		try :
-			import nnedi3_resample
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 nnedi3_resample")
-	if LooseVersion(nnedi3_resample.__version__) < LooseVersion("2") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 nnedi3_resample 的版本号过低，至少 2")
+	_import_nnedi3_resample(func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 
 	if ext_proc :
 		fmt_in = input.format.id
@@ -975,18 +1033,15 @@ def NGU_HQ(
 ) -> vs.VideoNode :
 
 	func_name = "NGU_HQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_node(input, func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "madvr") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 madvr")
+	_check_plugin_dependency("madvr", func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	w_in, h_in = input.width, input.height
 	w_rs, h_rs = w_in * 2, h_in * 2
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	colorlv = _get_color_range(input)
 	fmt_in = input.format.id
 
 	mad_param = ["upscale(newWidth=%d,newHeight=%d,algo=nguAaHigh)" % (w_rs, h_rs), "setOutputFormat(format=yuv420,bitdepth=10)"]
@@ -1014,23 +1069,18 @@ def MVT_LQ(
 ) -> vs.VideoNode :
 
 	func_name = "MVT_LQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_node(input, func_name)
 	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
 	if not isinstance(fps_out, (int, float)) or fps_out <= 0.0 or fps_out <= fps_in :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_out 的值无效")
-	if not isinstance(recal, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 recal 的值无效")
-	if not isinstance(block, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 block 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_bool_param(recal, "recal", func_name)
+	_validate_bool_param(block, "block", func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "mv") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
+	_check_plugin_dependency("mv", func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	w_in, h_in = input.width, input.height
 	blk_size = 32
 	w_tmp = math.ceil(w_in / blk_size) * blk_size - w_in
@@ -2229,36 +2279,27 @@ def NLM_STD(
 ) -> vs.VideoNode :
 
 	func_name = "NLM_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_node(input, func_name)
 	if blur_m not in [0, 1, 2] :
 		raise vs.Error(f"模块 {func_name} 的子参数 blur_m 的值无效")
 	if nlm_m not in [1, 2] :
 		raise vs.Error(f"模块 {func_name} 的子参数 nlm_m 的值无效")
-	if not isinstance(frame_num, int) or frame_num < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 frame_num 的值无效")
-	if not isinstance(rad_sw, int) or rad_sw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_sw 的值无效")
-	if not isinstance(rad_snw, int) or rad_snw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_snw 的值无效")
+	_validate_non_negative_int(frame_num, "frame_num", func_name)
+	_validate_non_negative_int(rad_sw, "rad_sw", func_name)
+	_validate_non_negative_int(rad_snw, "rad_snw", func_name)
 	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
 		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_gpu_param_strict(gpu, func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
 	if blur_m == 1 :
-		if not hasattr(core, "rgvs") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rgvs")
+		_check_plugin_dependency("rgvs", func_name)
 	if nlm_m == 1 :
-		if not hasattr(core, "knlm") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 knlm")
+		_check_plugin_dependency("knlm", func_name)
 	elif nlm_m == 2 :
-		if not hasattr(core, "nlm_ispc") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nlm_ispc")
+		_check_plugin_dependency("nlm_ispc", func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	fmt_in = input.format.id
 	blur, diff = LAYER_HIGH(input=input, blur_m=blur_m, vs_t=vs_t)
 
@@ -2298,32 +2339,23 @@ def NLM_NV(
 ) -> vs.VideoNode :
 
 	func_name = "NLM_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_node(input, func_name)
 	if blur_m not in [0, 1, 2] :
 		raise vs.Error(f"模块 {func_name} 的子参数 blur_m 的值无效")
-	if not isinstance(frame_num, int) or frame_num < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 frame_num 的值无效")
-	if not isinstance(rad_sw, int) or rad_sw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_sw 的值无效")
-	if not isinstance(rad_snw, int) or rad_snw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_snw 的值无效")
+	_validate_non_negative_int(frame_num, "frame_num", func_name)
+	_validate_non_negative_int(rad_sw, "rad_sw", func_name)
+	_validate_non_negative_int(rad_snw, "rad_snw", func_name)
 	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
 		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_gpu_param_strict(gpu, func_name)
+	_validate_positive_int(gpu_t, "gpu_t", func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "nlm_cuda") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nlm_cuda")
+	_check_plugin_dependency("nlm_cuda", func_name)
 	if blur_m == 1 :
-		if not hasattr(core, "rgvs") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rgvs")
+		_check_plugin_dependency("rgvs", func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	fmt_in = input.format.id
 	blur, diff = LAYER_HIGH(input=input, blur_m=blur_m, vs_t=vs_t)
 
@@ -2632,8 +2664,7 @@ def DEINT_EX(
 ) -> vs.VideoNode :
 
 	func_name = "DEINT_EX"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_node(input, func_name)
 	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
 	if deint_lv not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] :
@@ -2644,24 +2675,14 @@ def DEINT_EX(
 		raise vs.Error(f"模块 {func_name} 的子参数 deint_den 的值无效")
 	if tff not in [0, 1, 2] :
 		raise vs.Error(f"模块 {func_name} 的子参数 tff 的值无效")
-	if not isinstance(cpu, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_bool_param(cpu, "cpu", func_name)
+	_validate_gpu_param(gpu, func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	h_in = input.height
 
-	global qtgmc
-	if qtgmc is None :
-		try :
-			import qtgmc
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 qtgmc")
-	if LooseVersion(qtgmc.__version__) < LooseVersion("0.3.0") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 qtgmc 的版本号过低，至少 0.3.0")
+	_import_qtgmc(func_name)
 
 	if h_in % 2 != 0 :
 		input = core.std.Crop(clip=input, bottom=1)
@@ -2681,23 +2702,17 @@ def EDI_AA_STD(
 ) -> vs.VideoNode :
 
 	func_name = "EDI_AA_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(cpu, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_node(input, func_name)
+	_validate_bool_param(cpu, "cpu", func_name)
+	_validate_gpu_param(gpu, func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
 	if cpu :
-		if not hasattr(core, "znedi3") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 znedi3")
+		_check_plugin_dependency("znedi3", func_name)
 	else :
-		if not hasattr(core, "nnedi3cl") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nnedi3cl")
+		_check_plugin_dependency("nnedi3cl", func_name)
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	w_in, h_in = input.width, input.height
 
 	if cpu :
@@ -2909,48 +2924,24 @@ def UAI_DML(
 		raise vs.Error(f"模块 {func_name} 的子参数 crc 的值无效")
 	if len(model_pth) <= 5 :
 		raise vs.Error(f"模块 {func_name} 的子参数 model_pth 的值无效")
-	if not isinstance(fp16_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fp16_qnt 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_bool_param(fp16_qnt, "fp16_qnt", func_name)
+	_validate_gpu_param_strict(gpu, func_name)
+	_validate_positive_int(gpu_t, "gpu_t", func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "ort") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 ort")
+	_check_plugin_dependency("ort", func_name)
 	if clamp :
-		if not hasattr(core, "akarin") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin_dependency("akarin", func_name)
 
-	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
-	mdl_pth_rel = plg_dir + "/models/" + model_pth
-	if not os.path.exists(mdl_pth_rel) and not os.path.exists(model_pth) :
-		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
-	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
+	mdl_pth = _resolve_model_path(model_pth, "ort", func_name)
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.15.25") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.15.25")
+	_import_vsmlrt(func_name, "3.15.25")
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	fmt_in = input.format.id
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	colorlv = _get_color_range(input)
 
-	fp16_mdl = None
-	check_mdl = ONNX_ANZ(input=mdl_pth)
-	if check_mdl == 1 :
-		fp16_mdl = False
-	elif check_mdl == 10 :
-		fp16_mdl = True
-	else :
-		raise vs.Error(f"模块 {func_name} 的输入模型的输入精度不受支持")
+	fp16_mdl = _check_onnx_model_precision(mdl_pth, func_name)
 	if fp16_mdl :
 		fp16_qnt = False   ### ort对于fp16模型自动使用对应的IO
 
@@ -2983,58 +2974,30 @@ def UAI_MIGX(
 ) -> vs.VideoNode :
 
 	func_name = "UAI_MIGX"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(clamp, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 clamp 的值无效")
-	if not isinstance(crc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 crc 的值无效")
+	_validate_input_node(input, func_name)
+	_validate_bool_param(clamp, "clamp", func_name)
+	_validate_bool_param(crc, "crc", func_name)
 	if len(model_pth) <= 5 :
 		raise vs.Error(f"模块 {func_name} 的子参数 model_pth 的值无效")
-	if not isinstance(fp16_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fp16_qnt 的值无效")
-	if not isinstance(exh_tune, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 exh_tune 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_bool_param(fp16_qnt, "fp16_qnt", func_name)
+	_validate_bool_param(exh_tune, "exh_tune", func_name)
+	_validate_gpu_param_strict(gpu, func_name)
+	_validate_positive_int(gpu_t, "gpu_t", func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "migx") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 migx")
+	_check_plugin_dependency("migx", func_name)
 	if clamp :
-		if not hasattr(core, "akarin") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin_dependency("akarin", func_name)
 
-	plg_dir = os.path.dirname(core.migx.Version()["path"]).decode()
-	mdl_pth_rel = plg_dir + "/models/" + model_pth
-	if not os.path.exists(mdl_pth_rel) and not os.path.exists(model_pth) :
-		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
-	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
+	mdl_pth = _resolve_model_path(model_pth, "migx", func_name)
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.15.25") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.15.25")
+	_import_vsmlrt(func_name, "3.15.25")
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	fmt_in = input.format.id
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	colorlv = _get_color_range(input)
 
-	fp16_mdl = None
-	check_mdl = ONNX_ANZ(input=mdl_pth)
-	if check_mdl == 1 :
-		fp16_mdl = False
-	elif check_mdl == 10 :
-		fp16_mdl = True
-	else :
-		raise vs.Error(f"模块 {func_name} 的输入模型的输入精度不受支持")
+	fp16_mdl = _check_onnx_model_precision(mdl_pth, func_name)
 	if fp16_mdl :
 		fp16_qnt = True   ### 量化精度与模型精度匹配
 
@@ -3075,28 +3038,20 @@ def UAI_NV_TRT(
 ) -> vs.VideoNode :
 
 	func_name = "UAI_NV_TRT"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(clamp, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 clamp 的值无效")
-	if not isinstance(crc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 crc 的值无效")
+	_validate_input_node(input, func_name)
+	_validate_bool_param(clamp, "clamp", func_name)
+	_validate_bool_param(crc, "crc", func_name)
 	if len(model_pth) <= 5 :
 		raise vs.Error(f"模块 {func_name} 的子参数 model_pth 的值无效")
 	if opt_lv not in [0, 1, 2, 3, 4, 5] :
 		raise vs.Error(f"模块 {func_name} 的子参数 opt_lv 的值无效")
 	if not (len(cuda_opt) == 3 and all(isinstance(num, int) and num in [0, 1] for num in cuda_opt)) :
 		raise vs.Error(f"模块 {func_name} 的子参数 cuda_opt 的值无效")
-	if not isinstance(int8_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 int8_qnt 的值无效")
-	if not isinstance(fp16_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fp16_qnt 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
+	_validate_bool_param(int8_qnt, "int8_qnt", func_name)
+	_validate_bool_param(fp16_qnt, "fp16_qnt", func_name)
+	_validate_gpu_param_strict(gpu, func_name)
+	_validate_positive_int(gpu_t, "gpu_t", func_name)
+	_validate_bool_param(st_eng, "st_eng", func_name)
 #	if st_eng :
 #		if not (res_opt is None and res_max is None) :
 #			raise vs.Error(f"模块 {func_name} 的子参数 res_opt 或 res_max 的值无效")
@@ -3105,44 +3060,22 @@ def UAI_NV_TRT(
 			raise vs.Error(f"模块 {func_name} 的子参数 res_opt 的值无效")
 		if not (isinstance(res_max, list) and len(res_max) == 2 and all(isinstance(i, int) for i in res_max)) :
 			raise vs.Error(f"模块 {func_name} 的子参数 res_max 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_non_negative_int(ws_size, "ws_size", func_name)
+	_validate_vs_t_param(vs_t, func_name)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin_dependency("trt", func_name)
 	if clamp :
-		if not hasattr(core, "akarin") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin_dependency("akarin", func_name)
 
-	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
-	mdl_pth_rel = plg_dir + "/models/" + model_pth
-	if not os.path.exists(mdl_pth_rel) and not os.path.exists(model_pth) :
-		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
-	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
+	mdl_pth = _resolve_model_path(model_pth, "trt", func_name)
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.18.1") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.18.1")
+	_import_vsmlrt(func_name, "3.18.1")
 
-	core.num_threads = vs_t
+	_init_core_threads(vs_t)
 	fmt_in = input.format.id
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	colorlv = _get_color_range(input)
 
-	fp16_mdl = None
-	check_mdl = ONNX_ANZ(input=mdl_pth)
-	if check_mdl == 1 :
-		fp16_mdl = False
-	elif check_mdl == 10 :
-		fp16_mdl = True
-	else :
-		raise vs.Error(f"模块 {func_name} 的输入模型的输入精度不受支持")
+	fp16_mdl = _check_onnx_model_precision(mdl_pth, func_name)
 	if fp16_mdl :
 		fp16_qnt = True   ### 量化精度与模型精度匹配
 
