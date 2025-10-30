@@ -2,7 +2,7 @@
 ### 文档： https://github.com/hooke007/mpv_PlayKit/wiki/3_K7sfunc
 ##################################################
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 
 __all__ = [
 	"FMT_CHANGE", "FMT_CTRL",
@@ -187,6 +187,7 @@ onnx = None
 import typing
 import math
 import fractions
+import threading
 
 ##################################################
 ## 参数验证
@@ -254,6 +255,40 @@ def _validate_string_length(
 ) -> None :
 	if len(value) <= min_length :
 		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+##################################################
+## 依赖检查
+##################################################
+
+_plugin_cache = {}
+_plugin_cache_lock = threading.Lock()
+
+def _check_plugin(
+	func_name : str,
+	plugin_name: str,
+) -> None :
+	with _plugin_cache_lock :
+		if plugin_name not in _plugin_cache :
+			_plugin_cache[plugin_name] = hasattr(core, plugin_name)
+		if not _plugin_cache[plugin_name] :
+			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 {plugin_name}")
+
+def _check_script(
+	func_name : str,
+	script_name : str,
+	min_version : typing.Optional[str] = None,
+) -> typing.Any :
+	script_var = globals().get(script_name)
+	if script_var is None :
+		try :
+			script_var = __import__(script_name)
+			globals()[script_name] = script_var
+		except ImportError :
+			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 {script_name}")
+	if min_version is not None :
+		if LooseVersion(script_var.__version__) < LooseVersion(min_version) :
+			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 {script_name} 的版本号过低，至少 {min_version}")
+	return script_var
 
 ##################################################
 ## 格式转换 # TODO
@@ -418,8 +453,7 @@ def DCF(
 	func_name = "DCF"
 	core.num_threads = vs_t
 
-	if not hasattr(core, "vszip") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 vszip")
+	_check_plugin(func_name, "vszip")
 
 	fmt_in = input.format.id
 	fmt_ref = ref.format.id
@@ -626,12 +660,7 @@ def ONNX_ANZ(
 ) :
 
 	func_name = "ONNX_ANZ"
-	global onnx
-	if onnx is None :
-		try :
-			import onnx
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失库 onnx")
+	onnx = _check_script(func_name, "onnx")
 	from onnx.checker import ValidationError
 
 	if check_mdl :
@@ -742,8 +771,7 @@ def ACNET_STD(
 	_validate_literal(func_name, "gpu_m", gpu_m, [1, 2])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "anime4kcpp") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 anime4kcpp")
+	_check_plugin(func_name, "anime4kcpp")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -801,8 +829,7 @@ def ARTCNN_NV(
 	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin(func_name, "trt")
 
 	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
 	mdl_fname = ["ArtCNN_R16F96", "ArtCNN_R8F64", "ArtCNN_R8F64_DS"][[6, 7, 8].index(model)]
@@ -810,14 +837,7 @@ def ARTCNN_NV(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.21.13") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.21.13")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.21.13")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -873,8 +893,7 @@ def CUGAN_NV(
 	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin(func_name, "trt")
 
 	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
 	mdl_fname = ["pro-no-denoise3x-up2x", "pro-conservative-up2x", "pro-denoise3x-up2x"][[-1, 0, 3].index(nr_lv)]
@@ -882,14 +901,7 @@ def CUGAN_NV(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.18.1") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 版本号过低，至少 3.18.1")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.18.1")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -937,23 +949,13 @@ def EDI_US_STD(
 	_validate_literal(func_name, "gpu", gpu, [-1, 0, 1, 2])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "fmtc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 fmtc")
+	_check_plugin(func_name, "fmtc")
 	if cpu :
-		if not hasattr(core, "znedi3") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 znedi3")
+		_check_plugin(func_name, "znedi3")
 	else :
-		if not hasattr(core, "nnedi3cl") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nnedi3cl")
+		_check_plugin(func_name, "nnedi3cl")
 
-	global nnedi3_resample
-	if nnedi3_resample is None :
-		try :
-			import nnedi3_resample
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 nnedi3_resample")
-	if LooseVersion(nnedi3_resample.__version__) < LooseVersion("2") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 nnedi3_resample 的版本号过低，至少 2")
+	nnedi3_resample = _check_script(func_name, "nnedi3_resample", "2")
 
 	core.num_threads = vs_t
 
@@ -990,8 +992,7 @@ def NGU_HQ(
 	_validate_input_clip(func_name, input)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "madvr") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 madvr")
+	_check_plugin(func_name, "madvr")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -1032,8 +1033,7 @@ def MVT_LQ(
 	_validate_bool(func_name, "block", block)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "mv") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
+	_check_plugin(func_name, "mv")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -1094,8 +1094,7 @@ def MVT_MQ(
 	_validate_numeric(func_name, "thscd2", thscd2, min_val=0, max_val=255, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "mv") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
+	_check_plugin(func_name, "mv")
 
 	core.num_threads = vs_t
 	blksizev = blksize
@@ -1150,17 +1149,13 @@ def RIFE_STD(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "rife") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rife")
+	_check_plugin(func_name, "rife")
 	if skip :
-		if not hasattr(core, "vmaf") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 vmaf")
+		_check_plugin(func_name, "vmaf")
 	if sc_mode == 1 :
-		if not hasattr(core, "misc") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 misc")
+		_check_plugin(func_name, "misc")
 	elif sc_mode == 2 :
-		if not hasattr(core, "mv") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
+		_check_plugin(func_name, "mv")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -1213,16 +1208,12 @@ def RIFE_DML(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "ort") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 ort")
+	_check_plugin(func_name, "ort")
 	if sc_mode == 1 :
-		if not hasattr(core, "misc") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 misc")
+		_check_plugin(func_name, "misc")
 	elif sc_mode == 2 :
-		if not hasattr(core, "mv") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
-	if not hasattr(core, "akarin") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin(func_name, "mv")
+	_check_plugin(func_name, "akarin")
 
 	#ext_proc = True
 	#t_tta = False
@@ -1245,14 +1236,7 @@ def RIFE_DML(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.22.13") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.22.13")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.22.13")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -1341,16 +1325,12 @@ def RIFE_NV(
 	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin(func_name, "trt")
 	if sc_mode == 1 :
-		if not hasattr(core, "misc") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 misc")
+		_check_plugin(func_name, "misc")
 	elif sc_mode == 2 :
-		if not hasattr(core, "mv") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
-	if not hasattr(core, "akarin") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin(func_name, "mv")
+	_check_plugin(func_name, "akarin")
 
 	#ext_proc = True
 	#t_tta = False
@@ -1373,14 +1353,7 @@ def RIFE_NV(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.22.10") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.22.10")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.22.10")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -1481,8 +1454,8 @@ def SVP_LQ(
 	_validate_literal(func_name, "gpu", gpu, [0, 11, 12, 21])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "svp1") or not hasattr(core, "svp2") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 svp1 svp2")
+	_check_plugin(func_name, "svp1")
+	_check_plugin(func_name, "svp2")
 
 	core.num_threads = vs_t
 	fps_num = fps_num
@@ -1529,8 +1502,8 @@ def SVP_HQ(
 	_validate_literal(func_name, "gpu", gpu, [0, 11, 12, 21])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "svp1") or not hasattr(core, "svp2") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 svp1 svp2")
+	_check_plugin(func_name, "svp1")
+	_check_plugin(func_name, "svp2")
 
 	core.num_threads = vs_t
 	fps = fps_in or 23.976
@@ -1604,8 +1577,8 @@ def SVP_PRO(
 	_validate_literal(func_name, "gpu", gpu, [0, 11, 12, 21])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "svp1") or not hasattr(core, "svp2") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 svp1 svp2")
+	_check_plugin(func_name, "svp1")
+	_check_plugin(func_name, "svp2")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -1664,8 +1637,7 @@ def DPIR_DBLK_NV(
 	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin(func_name, "trt")
 
 	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
 	mdl_fname = ["drunet_deblocking_grayscale", "drunet_deblocking_color"][[2, 3].index(model)]
@@ -1673,14 +1645,7 @@ def DPIR_DBLK_NV(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.18.1") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.18.1")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.18.1")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -1755,8 +1720,7 @@ def BILA_NV(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "bilateralgpu_rtc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 bilateralgpu_rtc")
+	_check_plugin(func_name, "bilateralgpu_rtc")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -1793,8 +1757,7 @@ def BM3D_NV(
 	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "bm3dcuda_rtc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 bm3dcuda_rtc")
+	_check_plugin(func_name, "bm3dcuda_rtc")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -1822,8 +1785,7 @@ def CCD_STD(
 	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "akarin") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+	_check_plugin(func_name, "akarin")
 
 	core.num_threads = vs_t
 	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
@@ -1896,17 +1858,9 @@ def DFTT_STD(
 	_validate_numeric(func_name, "size_tb", size_tb, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "dfttest2_cpu") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 dfttest2_cpu")
+	_check_plugin(func_name, "dfttest2_cpu")
 
-	global dfttest2
-	if dfttest2 is None :
-		try :
-			import dfttest2
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 dfttest2")
-	if LooseVersion(dfttest2.__version__) < LooseVersion("0.3.3") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 dfttest2 的版本号过低，至少 0.3.3")
+	dfttest2 = _check_script(func_name, "dfttest2", "0.3.3")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -1947,20 +1901,12 @@ def DFTT_NV(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "dfttest2_nvrtc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 dfttest2_nvrtc")
+	_check_plugin(func_name, "dfttest2_nvrtc")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
 
-	global dfttest2
-	if dfttest2 is None :
-		try :
-			import dfttest2
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 dfttest2")
-	if LooseVersion(dfttest2.__version__) < LooseVersion("0.3.3") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 dfttest2 的版本号过低，至少 0.3.3")
+	dfttest2 = _check_script(func_name, "dfttest2", "0.3.3")
 
 	if fmt_in == vs.YUV444P16 :
 		cut0 = input
@@ -1998,8 +1944,7 @@ def DPIR_NR_NV(
 	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin(func_name, "trt")
 
 	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
 	mdl_fname = ["drunet_gray", "drunet_color"][[0, 1].index(model)]
@@ -2007,14 +1952,7 @@ def DPIR_NR_NV(
 	if not os.path.exists(mdl_pth) :
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.18.1") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.18.1")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.18.1")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -2089,14 +2027,11 @@ def FFT3D_STD(
 	_validate_numeric(func_name, "cpu_t", cpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin(func_name, "trt")
 	if mode == 1 :
-		if not hasattr(core, "fft3dfilter") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 fft3dfilter")
+		_check_plugin(func_name, "fft3dfilter")
 	elif mode == 2 :
-		if not hasattr(core, "neo_fft3d") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 neo_fft3d")
+		_check_plugin(func_name, "neo_fft3d")
 
 	core.num_threads = vs_t
 
@@ -2135,14 +2070,11 @@ def NLM_STD(
 	_validate_vs_threads(func_name, vs_t)
 
 	if blur_m == 1 :
-		if not hasattr(core, "rgvs") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rgvs")
+		_check_plugin(func_name, "rgvs")
 	if nlm_m == 1 :
-		if not hasattr(core, "knlm") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 knlm")
+		_check_plugin(func_name, "knlm")
 	elif nlm_m == 2 :
-		if not hasattr(core, "nlm_ispc") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nlm_ispc")
+		_check_plugin(func_name, "nlm_ispc")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -2194,11 +2126,9 @@ def NLM_NV(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "nlm_cuda") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nlm_cuda")
+	_check_plugin(func_name, "nlm_cuda")
 	if blur_m == 1 :
-		if not hasattr(core, "rgvs") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rgvs")
+		_check_plugin(func_name, "rgvs")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -2231,8 +2161,7 @@ def COLOR_P3W_FIX(
 	_validate_bool(func_name, "linear", linear)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "fmtc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 fmtc")
+	_check_plugin(func_name, "fmtc")
 
 	core.num_threads = vs_t
 	colorlv = input.get_frame(0).props._ColorRange
@@ -2354,8 +2283,7 @@ def DEBAND_STD(
 	_validate_literal(func_name, "depth", depth, [8, 10])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "neo_f3kdb") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 neo_f3kdb")
+	_check_plugin(func_name, "neo_f3kdb")
 
 	core.num_threads = vs_t
 	fmt_in = fmt_in = input.format.id
@@ -2386,8 +2314,7 @@ def DEINT_LQ(
 	_validate_bool(func_name, "tff", tff)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "bwdif") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 bwdif")
+	_check_plugin(func_name, "bwdif")
 
 	core.num_threads = vs_t
 
@@ -2422,23 +2349,17 @@ def DEINT_STD(
 	_validate_vs_threads(func_name, vs_t)
 
 	if ref_m == 1 :
-		if not hasattr(core, "znedi3") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 znedi3")
+		_check_plugin(func_name, "znedi3")
 	elif ref_m == 2 :
-		if not hasattr(core, "nnedi3cl") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nnedi3cl")
+		_check_plugin(func_name, "nnedi3cl")
 	elif ref_m == 3 :
-		if not hasattr(core, "eedi3m") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 eedi3m")
+		_check_plugin(func_name, "eedi3m")
 	if deint_m == 1 :
-		if not hasattr(core, "bwdif") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 bwdif")
+		_check_plugin(func_name, "bwdif")
 	elif deint_m == 2 :
-		if not hasattr(core, "yadifmod") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 yadifmod")
+		_check_plugin(func_name, "yadifmod")
 	elif deint_m == 3 :
-		if not hasattr(core, "tdm") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 tdm")
+		_check_plugin(func_name, "tdm")
 
 	core.num_threads = vs_t
 	h_in = input.height
@@ -2492,14 +2413,7 @@ def DEINT_EX(
 	core.num_threads = vs_t
 	h_in = input.height
 
-	global qtgmc
-	if qtgmc is None :
-		try :
-			import qtgmc
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 qtgmc")
-	if LooseVersion(qtgmc.__version__) < LooseVersion("0.3.0") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 qtgmc 的版本号过低，至少 0.3.0")
+	qtgmc = _check_script(func_name, "qtgmc", "0.3.0")
 
 	if h_in % 2 != 0 :
 		input = core.std.Crop(clip=input, bottom=1)
@@ -2525,11 +2439,9 @@ def EDI_AA_STD(
 	_validate_vs_threads(func_name, vs_t)
 
 	if cpu :
-		if not hasattr(core, "znedi3") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 znedi3")
+		_check_plugin(func_name, "znedi3")
 	else :
-		if not hasattr(core, "nnedi3cl") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nnedi3cl")
+		_check_plugin(func_name, "nnedi3cl")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
@@ -2569,8 +2481,7 @@ def EDI_AA_NV(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "eedi2cuda") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 eedi2cuda")
+	_check_plugin(func_name, "eedi2cuda")
 
 	core.num_threads = vs_t
 
@@ -2596,11 +2507,9 @@ def IVTC_STD(
 	_validate_vs_threads(func_name, vs_t)
 
 	if ivtc_m == 1 :
-		if not hasattr(core, "vivtc") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 vivtc")
+		_check_plugin(func_name, "vivtc")
 	elif ivtc_m == 2 :
-		if not hasattr(core, "tivtc") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 tivtc")
+		_check_plugin(func_name, "tivtc")
 
 	core.num_threads = vs_t
 	if fps_in <= 24 or fps_in >= 31 or (fps_in >= 26 and fps_in <= 29) :
@@ -2633,14 +2542,10 @@ def STAB_STD(
 	_validate_input_clip(func_name, input)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "focus2") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 focus2")
-	if not hasattr(core, "mv") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
-	if not hasattr(core, "misc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 misc")
-	if not hasattr(core, "rgvs") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rgvs")
+	_check_plugin(func_name, "focus2")
+	_check_plugin(func_name, "mv")
+	_check_plugin(func_name, "misc")
+	_check_plugin(func_name, "rgvs")
 
 	core.num_threads = vs_t
 
@@ -2667,12 +2572,9 @@ def STAB_HQ(
 	_validate_input_clip(func_name, input)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "mv") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
-	if not hasattr(core, "misc") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 misc")
-	if not hasattr(core, "rgvs") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rgvs")
+	_check_plugin(func_name, "mv")
+	_check_plugin(func_name, "misc")
+	_check_plugin(func_name, "rgvs")
 
 	core.num_threads = vs_t
 
@@ -2732,11 +2634,9 @@ def UAI_DML(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "ort") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 ort")
+	_check_plugin(func_name, "ort")
 	if clamp :
-		if not hasattr(core, "akarin") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin(func_name, "akarin")
 
 	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
 	mdl_pth_rel = plg_dir + "/models/" + model_pth
@@ -2744,14 +2644,7 @@ def UAI_DML(
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.15.25") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.15.25")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.15.25")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -2807,11 +2700,9 @@ def UAI_MIGX(
 	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "migx") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 migx")
+	_check_plugin(func_name, "migx")
 	if clamp :
-		if not hasattr(core, "akarin") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin(func_name, "akarin")
 
 	plg_dir = os.path.dirname(core.migx.Version()["path"]).decode()
 	mdl_pth_rel = plg_dir + "/models/" + model_pth
@@ -2819,14 +2710,7 @@ def UAI_MIGX(
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.15.25") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.15.25")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.15.25")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -2903,11 +2787,9 @@ def UAI_NV_TRT(
 	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "trt") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
+	_check_plugin(func_name, "trt")
 	if clamp :
-		if not hasattr(core, "akarin") :
-			raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
+		_check_plugin(func_name, "akarin")
 
 	plg_dir = os.path.dirname(core.trt.Version()["path"]).decode()
 	mdl_pth_rel = plg_dir + "/models/" + model_pth
@@ -2915,14 +2797,7 @@ def UAI_NV_TRT(
 		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
 
-	global vsmlrt
-	if vsmlrt is None :
-		try :
-			import vsmlrt
-		except ImportError :
-			raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt")
-	if LooseVersion(vsmlrt.__version__) < LooseVersion("3.18.1") :
-		raise ImportError(f"模块 {func_name} 依赖错误：缺失脚本 vsmlrt 的版本号过低，至少 3.18.1")
+	vsmlrt = _check_script(func_name, "vsmlrt", "3.18.1")
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -2981,8 +2856,7 @@ def UVR_MAD(
 	_validate_literal(func_name, "rca_q", rca_q, [1, 2, 3, 4])
 	_validate_vs_threads(func_name, vs_t)
 
-	if not hasattr(core, "madvr") :
-		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 madvr")
+	_check_plugin(func_name, "madvr")
 
 	core.num_threads = vs_t
 	w_in, h_in = input.width, input.height
