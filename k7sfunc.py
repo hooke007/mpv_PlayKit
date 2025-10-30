@@ -2,7 +2,7 @@
 ### 文档： https://github.com/hooke007/mpv_PlayKit/wiki/3_K7sfunc
 ##################################################
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 __all__ = [
 	"FMT_CHANGE", "FMT_CTRL",
@@ -189,6 +189,73 @@ import math
 import fractions
 
 ##################################################
+## 参数验证
+##################################################
+
+def _validate_input_clip(
+	func_name : str,
+	input,
+) -> None :
+	if not isinstance(input, vs.VideoNode) :
+		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+
+def _validate_bool(
+	func_name : str,
+	param_name : str,
+	value,
+) -> None :
+	if not isinstance(value, bool) :
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+def _validate_numeric(
+	func_name : str,
+	param_name : str,
+	value,
+	min_val = None,
+	max_val = None,
+	exclusive_min = False,
+	int_only = False,
+) -> None :
+	if int_only :
+		if not isinstance(value, int) :
+			raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+	else :
+		if not isinstance(value, (int, float)) :
+			raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+	if min_val is not None :
+		if exclusive_min and value <= min_val :
+			raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+		elif not exclusive_min and value < min_val :
+			raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+	if max_val is not None and value > max_val :
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+def _validate_literal(
+	func_name : str,
+	param_name : str,
+	value,
+	valid_values : list,
+) -> None :
+	if value not in valid_values :
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+def _validate_vs_threads(
+	func_name : str,
+	vs_t : int,
+) -> None :
+	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
+		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+
+def _validate_string_length(
+	func_name : str,
+	param_name : str,
+	value : str,
+	min_length : int,
+) -> None :
+	if len(value) <= min_length :
+		raise vs.Error(f"模块 {func_name} 的子参数 {param_name} 的值无效")
+
+##################################################
 ## 格式转换 # TODO
 ##################################################
 
@@ -206,25 +273,16 @@ def FMT_CHANGE(
 ) -> vs.VideoNode :
 
 	func_name = "FMT_CHANGE"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fmtc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fmtc 的值无效")
-	if algo not in [1, 2, 3, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 algo 的值无效")
-	if not isinstance(param_a, (int, float)) or not isinstance(param_b, (int, float)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 param_a 或 param_b 的值无效")
-	if not isinstance(w_out, int) or not isinstance(h_out, int) :
-		raise vs.Error(f"模块 {func_name} 的子参数 w_out 或 h_out 的值无效")
-	if isinstance(w_out, int) and isinstance(h_out, int) :
-		if w_out < 0 or h_out < 0 :
-			raise vs.Error(f"模块 {func_name} 的子参数 w_out 或 h_out 的值无效")
-	if fmt_pix not in [-1, 0, 1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 fmt_pix 的值无效")
-	if dither not in [0, 1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 dither 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "fmtc", fmtc)
+	_validate_literal(func_name, "algo", algo, [1, 2, 3, 4])
+	_validate_numeric(func_name, "param_a", param_a)
+	_validate_numeric(func_name, "param_b", param_b)
+	_validate_numeric(func_name, "w_out", w_out, min_val=0, int_only=True)
+	_validate_numeric(func_name, "h_out", h_out, min_val=0, int_only=True)
+	_validate_literal(func_name, "fmt_pix", fmt_pix, [-1, 0, 1, 2, 3])
+	_validate_literal(func_name, "dither", dither, [0, 1, 2, 3])
+	_validate_vs_threads(func_name, vs_t)
 
 	core.num_threads = vs_t
 	fmt_in = input.format.id
@@ -258,20 +316,13 @@ def FMT_CTRL(
 ) -> vs.VideoNode :
 
 	func_name = "FMT_CTRL"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(h_max, int) or h_max < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 h_max 的值无效")
-	if not isinstance(h_ret, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 h_ret 的值无效")
-	if not isinstance(spl_b, (int, float)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 spl_b 的值无效")
-	if not isinstance(spl_c, (int, float)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 spl_c 的值无效")
-	if fmt_pix not in [0, 1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 fmt_pix 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "h_max", h_max, min_val=0, int_only=True)
+	_validate_bool(func_name, "h_ret", h_ret)
+	_validate_numeric(func_name, "spl_b", spl_b)
+	_validate_numeric(func_name, "spl_c", spl_c)
+	_validate_literal(func_name, "fmt_pix", fmt_pix, [0, 1, 2, 3])
+	_validate_vs_threads(func_name, vs_t)
 
 	core.num_threads = vs_t
 	fmt_src = input.format
@@ -612,14 +663,11 @@ def FPS_CHANGE(
 ) -> vs.VideoNode :
 
 	func_name = "FPS_CHANGE"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
 	if not isinstance(fps_out, (int, float)) or fps_out <= 0.0 or fps_out == fps_in :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_out 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_vs_threads(func_name, vs_t)
 
 	core.num_threads = vs_t
 
@@ -652,17 +700,12 @@ def FPS_CTRL(
 ) -> vs.VideoNode :
 
 	func_name = "FPS_CTRL"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
 	if fps_out is not None :
-		if not isinstance(fps_out, (int, float)) or fps_out <= 0.0 :
-			raise vs.Error(f"模块 {func_name} 的子参数 fps_out 的值无效")
-	if not isinstance(fps_ret, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_ret 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+		_validate_numeric(func_name, "fps_out", fps_out, min_val=0.0)
+	_validate_bool(func_name, "fps_ret", fps_ret)
+	_validate_vs_threads(func_name, vs_t)
 
 	core.num_threads = vs_t
 
@@ -691,20 +734,13 @@ def ACNET_STD(
 ) -> vs.VideoNode :
 
 	func_name = "ACNET_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if model not in [1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if model_var not in [0, 1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model_var 的值无效")
-	if not isinstance(turbo, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 turbo 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if gpu_m not in [1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_m 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "model", model, [1, 2, 3])
+	_validate_literal(func_name, "model_var", model_var, [0, 1, 2, 3])
+	_validate_bool(func_name, "turbo", turbo)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_literal(func_name, "gpu_m", gpu_m, [1, 2])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "anime4kcpp") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 anime4kcpp")
@@ -756,22 +792,14 @@ def ARTCNN_NV(
 ) -> vs.VideoNode :
 
 	func_name = "ARTCNN_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(lt_hd, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 lt_hd 的值无效")
-	if model not in [6, 7, 8] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "lt_hd", lt_hd)
+	_validate_literal(func_name, "model", model, [6, 7, 8])
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_bool(func_name, "st_eng", st_eng)
+	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "trt") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
@@ -835,24 +863,15 @@ def CUGAN_NV(
 ) -> vs.VideoNode :
 
 	func_name = "CUGAN_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(lt_hd, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 lt_hd 的值无效")
-	if nr_lv not in [-1, 0, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if not isinstance(sharp_lv, (int, float)) or sharp_lv < 0.0 or sharp_lv > 2.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 sharp_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "lt_hd", lt_hd)
+	_validate_literal(func_name, "nr_lv", nr_lv, [-1, 0, 3])
+	_validate_numeric(func_name, "sharp_lv", sharp_lv, min_val=0.0, max_val=2.0)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_bool(func_name, "st_eng", st_eng)
+	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "trt") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
@@ -910,20 +929,13 @@ def EDI_US_STD(
 ) -> vs.VideoNode :
 
 	func_name = "EDI_US_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(ext_proc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 ext_proc 的值无效")
-	if nsize not in [0, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 nsize 的值无效")
-	if nns not in [2, 3, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 nns 的值无效")
-	if not isinstance(cpu, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "ext_proc", ext_proc)
+	_validate_literal(func_name, "nsize", nsize, [0, 4])
+	_validate_literal(func_name, "nns", nns, [2, 3, 4])
+	_validate_bool(func_name, "cpu", cpu)
+	_validate_literal(func_name, "gpu", gpu, [-1, 0, 1, 2])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "fmtc") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 fmtc")
@@ -975,10 +987,8 @@ def NGU_HQ(
 ) -> vs.VideoNode :
 
 	func_name = "NGU_HQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "madvr") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 madvr")
@@ -1014,18 +1024,13 @@ def MVT_LQ(
 ) -> vs.VideoNode :
 
 	func_name = "MVT_LQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
 	if not isinstance(fps_out, (int, float)) or fps_out <= 0.0 or fps_out <= fps_in :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_out 的值无效")
-	if not isinstance(recal, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 recal 的值无效")
-	if not isinstance(block, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 block 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_bool(func_name, "recal", recal)
+	_validate_bool(func_name, "block", block)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "mv") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
@@ -1078,24 +1083,16 @@ def MVT_MQ(
 ) -> vs.VideoNode :
 
 	func_name = "MVT_MQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
 	if not isinstance(fps_out, (int, float)) or fps_out <= 0.0 or fps_out <= fps_in :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_out 的值无效")
-	if qty_lv not in [1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 qty_lv 的值无效")
-	if not isinstance(block, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 block 的值无效")
-	if blksize not in [4, 8, 16, 32] :
-		raise vs.Error(f"模块 {func_name} 的子参数 blksize 的值无效")
-	if not (isinstance(thscd1, int) and thscd1 >= 0) :
-		raise vs.Error(f"模块 {func_name} 的子参数 thscd1 的值无效")
-	if not (isinstance(thscd2, int) and (thscd2 >= 0 and thscd2 <= 255)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 thscd2 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "qty_lv", qty_lv, [1, 2, 3])
+	_validate_bool(func_name, "block", block)
+	_validate_literal(func_name, "blksize", blksize, [4, 8, 16, 32])
+	_validate_numeric(func_name, "thscd1", thscd1, min_val=0, int_only=True)
+	_validate_numeric(func_name, "thscd2", thscd2, min_val=0, max_val=255, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "mv") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
@@ -1140,28 +1137,18 @@ def RIFE_STD(
 ) -> vs.VideoNode :
 
 	func_name = "RIFE_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if model not in [23, 70, 72, 73] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if not isinstance(t_tta, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 t_tta 的值无效")
-	if not isinstance(fps_num, int) or fps_num < 2 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_num 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "model", model, [23, 70, 72, 73])
+	_validate_bool(func_name, "t_tta", t_tta)
+	_validate_numeric(func_name, "fps_num", fps_num, min_val=2, int_only=True)
 	if not isinstance(fps_den, int) or fps_den >= fps_num or fps_num/fps_den <= 1 :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_den 的值无效")
-	if sc_mode not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 sc_mode 的值无效")
-	if not isinstance(skip, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 skip 的值无效")
-	if not isinstance(stat_th, (int, float)) or stat_th <= 0.0 or stat_th > 60.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 stat_th 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "sc_mode", sc_mode, [0, 1, 2])
+	_validate_bool(func_name, "skip", skip)
+	_validate_numeric(func_name, "stat_th", stat_th, min_val=0.0, max_val=60.0)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "rife") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 rife")
@@ -1214,26 +1201,17 @@ def RIFE_DML(
 ) -> vs.VideoNode :
 
 	func_name = "RIFE_DML"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if model not in [46, 4251, 426, 4262] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if not isinstance(turbo, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 turbo 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
-	if not isinstance(fps_num, int) or fps_num < 2 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_num 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "model", model, [46, 4251, 426, 4262])
+	_validate_bool(func_name, "turbo", turbo)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_numeric(func_name, "fps_num", fps_num, min_val=2, int_only=True)
 	if not isinstance(fps_den, int) or fps_den >= fps_num or fps_num/fps_den <= 1 :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_den 的值无效")
-	if sc_mode not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 sc_mode 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "sc_mode", sc_mode, [0, 1, 2])
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "ort") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 ort")
@@ -1349,30 +1327,19 @@ def RIFE_NV(
 ) -> vs.VideoNode :
 
 	func_name = "RIFE_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if model not in [46, 4251, 426, 4262] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if not isinstance(int8_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 int8_qnt 的值无效")
-	if not isinstance(turbo, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 turbo 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
-	if not isinstance(fps_num, int) or fps_num < 2 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_num 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "model", model, [46, 4251, 426, 4262])
+	_validate_bool(func_name, "int8_qnt", int8_qnt)
+	_validate_bool(func_name, "turbo", turbo)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_numeric(func_name, "fps_num", fps_num, min_val=2, int_only=True)
 	if not isinstance(fps_den, int) or fps_den >= fps_num or fps_num/fps_den <= 1 :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_den 的值无效")
-	if sc_mode not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 sc_mode 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "sc_mode", sc_mode, [0, 1, 2])
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "trt") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
@@ -1507,18 +1474,12 @@ def SVP_LQ(
 ) -> vs.VideoNode :
 
 	func_name = "SVP_LQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
-	if fps_num not in [2, 3, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_num 的值无效")
-	if cpu not in [0, 1] :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [0, 11, 12, 21] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "fps_num", fps_num, [2, 3, 4])
+	_validate_literal(func_name, "cpu", cpu, [0, 1])
+	_validate_literal(func_name, "gpu", gpu, [0, 11, 12, 21])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "svp1") or not hasattr(core, "svp2") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 svp1 svp2")
@@ -1561,18 +1522,12 @@ def SVP_HQ(
 ) -> vs.VideoNode :
 
 	func_name = "SVP_HQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
-	if not isinstance(fps_dp, (int, float)) or fps_dp < 23.976 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_dp 的值无效")
-	if cpu not in [0, 1] :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [0, 11, 12, 21] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_numeric(func_name, "fps_dp", fps_dp, min_val=23.976)
+	_validate_literal(func_name, "cpu", cpu, [0, 1])
+	_validate_literal(func_name, "gpu", gpu, [0, 11, 12, 21])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "svp1") or not hasattr(core, "svp2") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 svp1 svp2")
@@ -1634,28 +1589,20 @@ def SVP_PRO(
 ) -> vs.VideoNode :
 
 	func_name = "SVP_PRO"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
-	if not (isinstance(fps_num, int) and fps_num > 1) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_num 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_numeric(func_name, "fps_num", fps_num, min_val=2, int_only=True)
 	if not (isinstance(fps_den, int) and fps_den >= 1 and fps_den < fps_num) :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_den 的值无效")
-	if not isinstance(abs, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 abs 的值无效")
+	_validate_bool(func_name, "abs", abs)
 	if abs and (fps_num / fps_den <= fps_in) :
 		raise vs.Error(f"模块 {func_name} 的子参数 fps_num 或 fps_den 的值无效")
-	if cpu not in [0, 1] :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if not isinstance(nvof, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 nvof 的值无效")
+	_validate_literal(func_name, "cpu", cpu, [0, 1])
+	_validate_bool(func_name, "nvof", nvof)
 	if nvof and cpu :
 		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [0, 11, 12, 21] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "gpu", gpu, [0, 11, 12, 21])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "svp1") or not hasattr(core, "svp2") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 svp1 svp2")
@@ -1707,24 +1654,15 @@ def DPIR_DBLK_NV(
 ) -> vs.VideoNode :
 
 	func_name = "DPIR_DBLK_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(lt_hd, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 lt_hd 的值无效")
-	if model not in [2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "lt_hd", lt_hd)
+	_validate_literal(func_name, "model", model, [2, 3])
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_bool(func_name, "st_eng", st_eng)
+	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "trt") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
@@ -1808,18 +1746,14 @@ def BILA_NV(
 ) -> vs.VideoNode :
 
 	func_name = "BILA_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_clip(func_name, input)
 	if not (isinstance(nr_spat, list) and len(nr_spat) == 3) :
 		raise vs.Error(f"模块 {func_name} 的子参数 nr_spat 的值无效")
 	if not (isinstance(nr_csp, list) and len(nr_csp) == 3) :
 		raise vs.Error(f"模块 {func_name} 的子参数 nr_csp 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "bilateralgpu_rtc") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 bilateralgpu_rtc")
@@ -1850,18 +1784,14 @@ def BM3D_NV(
 ) -> vs.VideoNode :
 
 	func_name = "BM3D_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_clip(func_name, input)
 	if not (isinstance(nr_lv, list) and len(nr_lv) == 3 and all(isinstance(i, int) for i in nr_lv)) :
 		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if bs_ref not in [1, 2, 3, 4, 5, 6, 7, 8] :
-		raise vs.Error(f"模块 {func_name} 的子参数 bs_ref 的值无效")
+	_validate_literal(func_name, "bs_ref", bs_ref, [1, 2, 3, 4, 5, 6, 7, 8])
 	if bs_out not in [1, 2, 3, 4, 5, 6, 7, 8] or bs_out >= bs_ref :
 		raise vs.Error(f"模块 {func_name} 的子参数 bs_out 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "bm3dcuda_rtc") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 bm3dcuda_rtc")
@@ -1888,12 +1818,9 @@ def CCD_STD(
 ) -> vs.VideoNode :
 
 	func_name = "CCD_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "akarin") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 akarin")
@@ -1961,20 +1888,13 @@ def DFTT_STD(
 ) -> vs.VideoNode :
 
 	func_name = "DFTT_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if plane not in ([0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]) :
-		raise vs.Error(f"模块 {func_name} 的子参数 plane 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if not isinstance(size_sb, int) or size_sb <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 size_sb 的值无效")
-	if not isinstance(size_so, int) or size_so <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 size_so 的值无效")
-	if not isinstance(size_tb, int) or size_tb <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 size_tb 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "plane", plane, [[0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]])
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_numeric(func_name, "size_sb", size_sb, min_val=1, int_only=True)
+	_validate_numeric(func_name, "size_so", size_so, min_val=1, int_only=True)
+	_validate_numeric(func_name, "size_tb", size_tb, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "dfttest2_cpu") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 dfttest2_cpu")
@@ -2017,24 +1937,15 @@ def DFTT_NV(
 ) -> vs.VideoNode :
 
 	func_name = "DFTT_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if plane not in ([0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]) :
-		raise vs.Error(f"模块 {func_name} 的子参数 plane 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if not isinstance(size_sb, int) or size_sb <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 size_sb 的值无效")
-	if not isinstance(size_so, int) or size_so <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 size_so 的值无效")
-	if not isinstance(size_tb, int) or size_tb <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 size_tb 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "plane", plane, [[0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]])
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_numeric(func_name, "size_sb", size_sb, min_val=1, int_only=True)
+	_validate_numeric(func_name, "size_so", size_so, min_val=1, int_only=True)
+	_validate_numeric(func_name, "size_tb", size_tb, min_val=1, int_only=True)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "dfttest2_nvrtc") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 dfttest2_nvrtc")
@@ -2077,24 +1988,15 @@ def DPIR_NR_NV(
 ) -> vs.VideoNode :
 
 	func_name = "DPIR_NR_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(lt_hd, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 lt_hd 的值无效")
-	if model not in [0, 1] :
-		raise vs.Error(f"模块 {func_name} 的子参数 model 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "lt_hd", lt_hd)
+	_validate_literal(func_name, "model", model, [0, 1])
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_bool(func_name, "st_eng", st_eng)
+	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "trt") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
@@ -2179,20 +2081,13 @@ def FFT3D_STD(
 ) -> vs.VideoNode :
 
 	func_name = "FFT3D_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if mode not in [1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 mode 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if plane not in ([0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]) :
-		raise vs.Error(f"模块 {func_name} 的子参数 plane 的值无效")
-	if frame_bk not in [-1, 0, 1, 2, 3, 4, 5] :
-		raise vs.Error(f"模块 {func_name} 的子参数 frame_bk 的值无效")
-	if not isinstance(cpu_t, int) or cpu_t < 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "mode", mode, [1, 2])
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "plane", plane, [[0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]])
+	_validate_literal(func_name, "frame_bk", frame_bk, [-1, 0, 1, 2, 3, 4, 5])
+	_validate_numeric(func_name, "cpu_t", cpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "trt") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
@@ -2229,24 +2124,15 @@ def NLM_STD(
 ) -> vs.VideoNode :
 
 	func_name = "NLM_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if blur_m not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 blur_m 的值无效")
-	if nlm_m not in [1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 nlm_m 的值无效")
-	if not isinstance(frame_num, int) or frame_num < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 frame_num 的值无效")
-	if not isinstance(rad_sw, int) or rad_sw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_sw 的值无效")
-	if not isinstance(rad_snw, int) or rad_snw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_snw 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "blur_m", blur_m, [0, 1, 2])
+	_validate_literal(func_name, "nlm_m", nlm_m, [1, 2])
+	_validate_numeric(func_name, "frame_num", frame_num, min_val=0, int_only=True)
+	_validate_numeric(func_name, "rad_sw", rad_sw, min_val=0, int_only=True)
+	_validate_numeric(func_name, "rad_snw", rad_snw, min_val=0, int_only=True)
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_vs_threads(func_name, vs_t)
 
 	if blur_m == 1 :
 		if not hasattr(core, "rgvs") :
@@ -2298,24 +2184,15 @@ def NLM_NV(
 ) -> vs.VideoNode :
 
 	func_name = "NLM_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if blur_m not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 blur_m 的值无效")
-	if not isinstance(frame_num, int) or frame_num < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 frame_num 的值无效")
-	if not isinstance(rad_sw, int) or rad_sw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_sw 的值无效")
-	if not isinstance(rad_snw, int) or rad_snw < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 rad_snw 的值无效")
-	if not isinstance(nr_lv, (int, float)) or nr_lv <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "blur_m", blur_m, [0, 1, 2])
+	_validate_numeric(func_name, "frame_num", frame_num, min_val=0, int_only=True)
+	_validate_numeric(func_name, "rad_sw", rad_sw, min_val=0, int_only=True)
+	_validate_numeric(func_name, "rad_snw", rad_snw, min_val=0, int_only=True)
+	_validate_numeric(func_name, "nr_lv", nr_lv, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "nlm_cuda") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 nlm_cuda")
@@ -2350,12 +2227,9 @@ def COLOR_P3W_FIX(
 ) -> vs.VideoNode :
 
 	func_name = "COLOR_P3W_FIX"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(linear, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 linear 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "linear", linear)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "fmtc") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 fmtc")
@@ -2390,20 +2264,13 @@ def CSC_RB(
 ) -> vs.VideoNode :
 
 	func_name = "CSC_RB"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(cx, int) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cx 的值无效")
-	if not isinstance(cy, int) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cy 的值无效")
-	if not isinstance(thr, (int, float)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 thr 的值无效")
-	if not isinstance(sat_lv, (int, float)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 sat_lv 的值无效")
-	if not isinstance(blur, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 blur 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "cx", cx, int_only=True)
+	_validate_numeric(func_name, "cy", cy, int_only=True)
+	_validate_numeric(func_name, "sat_lv1", sat_lv1)
+	_validate_numeric(func_name, "sat_lv2", sat_lv2)
+	_validate_bool(func_name, "blur", blur)
+	_validate_vs_threads(func_name, vs_t)
 
 	core.num_threads = vs_t
 	neutral = 1 << (input.format.bits_per_sample - 1)
@@ -2476,26 +2343,16 @@ def DEBAND_STD(
 ) -> vs.VideoNode :
 
 	func_name = "DEBAND_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(bd_range, int) or bd_range < 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 bd_range 的值无效")
-	if not isinstance(bdy_rth, int) or bdy_rth < 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 bdy_rth 的值无效")
-	if not isinstance(bdc_rth, int) or bdc_rth < 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 bdc_rth 的值无效")
-	if not isinstance(grainy, int) or grainy < 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 grainy 的值无效")
-	if not isinstance(grainc, int) or grainc < 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 grainc 的值无效")
-	if spl_m not in [1, 2, 3, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 spl_m 的值无效")
-	if not isinstance(grain_dy, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 grain_dy 的值无效")
-	if depth not in [8, 10] :
-		raise vs.Error(f"模块 {func_name} 的子参数 depth 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "bd_range", bd_range, min_val=1, int_only=True)
+	_validate_numeric(func_name, "bdy_rth", bdy_rth, min_val=1, int_only=True)
+	_validate_numeric(func_name, "bdc_rth", bdc_rth, min_val=1, int_only=True)
+	_validate_numeric(func_name, "grainy", grainy, min_val=1, int_only=True)
+	_validate_numeric(func_name, "grainc", grainc, min_val=1, int_only=True)
+	_validate_literal(func_name, "spl_m", spl_m, [1, 2, 3, 4])
+	_validate_bool(func_name, "grain_dy", grain_dy)
+	_validate_literal(func_name, "depth", depth, [8, 10])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "neo_f3kdb") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 neo_f3kdb")
@@ -2523,15 +2380,11 @@ def DEINT_LQ(
 	vs_t : int = vs_thd_dft,
 ) -> vs.VideoNode :
 
-	func_name = "DEINT_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(iden, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 iden 的值无效")
-	if not isinstance(tff, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 tff 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	func_name = "DEINT_LQ"
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "iden", iden)
+	_validate_bool(func_name, "tff", tff)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "bwdif") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 bwdif")
@@ -2561,18 +2414,12 @@ def DEINT_STD(
 ) -> vs.VideoNode :
 
 	func_name = "DEINT_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if ref_m not in [1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 ref_m 的值无效")
-	if not isinstance(tff, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 tff 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if deint_m not in [1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 deint_m 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "ref_m", ref_m, [1, 2, 3])
+	_validate_bool(func_name, "tff", tff)
+	_validate_literal(func_name, "gpu", gpu, [-1, 0, 1, 2])
+	_validate_literal(func_name, "deint_m", deint_m, [1, 2, 3])
+	_validate_vs_threads(func_name, vs_t)
 
 	if ref_m == 1 :
 		if not hasattr(core, "znedi3") :
@@ -2632,24 +2479,15 @@ def DEINT_EX(
 ) -> vs.VideoNode :
 
 	func_name = "DEINT_EX"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
-	if deint_lv not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] :
-		raise vs.Error(f"模块 {func_name} 的子参数 deint_lv 的值无效")
-	if src_type not in [0, 1, 2, 3] :
-		raise vs.Error(f"模块 {func_name} 的子参数 src_type 的值无效")
-	if deint_den not in [1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 deint_den 的值无效")
-	if tff not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 tff 的值无效")
-	if not isinstance(cpu, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "deint_lv", deint_lv, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+	_validate_literal(func_name, "src_type", src_type, [0, 1, 2, 3])
+	_validate_literal(func_name, "deint_den", deint_den, [1, 2])
+	_validate_literal(func_name, "tff", tff, [0, 1, 2])
+	_validate_bool(func_name, "cpu", cpu)
+	_validate_literal(func_name, "gpu", gpu, [-1, 0, 1, 2])
+	_validate_vs_threads(func_name, vs_t)
 
 	core.num_threads = vs_t
 	h_in = input.height
@@ -2681,14 +2519,10 @@ def EDI_AA_STD(
 ) -> vs.VideoNode :
 
 	func_name = "EDI_AA_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(cpu, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 cpu 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "cpu", cpu)
+	_validate_literal(func_name, "gpu", gpu, [-1, 0, 1, 2])
+	_validate_vs_threads(func_name, vs_t)
 
 	if cpu :
 		if not hasattr(core, "znedi3") :
@@ -2728,16 +2562,12 @@ def EDI_AA_NV(
 ) -> vs.VideoNode :
 
 	func_name = "EDI_AA_NV"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
+	_validate_input_clip(func_name, input)
 #	if plane not in ([0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2]) :
 #		raise vs.Error(f"模块 {func_name} 的子参数 plane 的值无效")
-	if gpu not in [-1, 0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_literal(func_name, "gpu", gpu, [-1, 0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "eedi2cuda") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 eedi2cuda")
@@ -2760,14 +2590,10 @@ def IVTC_STD(
 ) -> vs.VideoNode :
 
 	func_name = "IVTC_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(fps_in, (int, float)) or fps_in <= 0.0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_in 的值无效")
-	if ivtc_m not in [1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 ivtc_m 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_literal(func_name, "ivtc_m", ivtc_m, [1, 2])
+	_validate_vs_threads(func_name, vs_t)
 
 	if ivtc_m == 1 :
 		if not hasattr(core, "vivtc") :
@@ -2804,10 +2630,8 @@ def STAB_STD(
 ) -> vs.VideoNode :
 
 	func_name = "STAB_STD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "focus2") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 focus2")
@@ -2840,10 +2664,8 @@ def STAB_HQ(
 ) -> vs.VideoNode :
 
 	func_name = "STAB_HQ"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "mv") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 mv")
@@ -2901,22 +2723,14 @@ def UAI_DML(
 ) -> vs.VideoNode :
 
 	func_name = "UAI_DML"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(clamp, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 clamp 的值无效")
-	if not isinstance(crc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 crc 的值无效")
-	if len(model_pth) <= 5 :
-		raise vs.Error(f"模块 {func_name} 的子参数 model_pth 的值无效")
-	if not isinstance(fp16_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fp16_qnt 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "clamp", clamp)
+	_validate_bool(func_name, "crc", crc)
+	_validate_string_length(func_name, "model_pth", model_pth, 5)
+	_validate_bool(func_name, "fp16_qnt", fp16_qnt)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "ort") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 ort")
@@ -2983,24 +2797,15 @@ def UAI_MIGX(
 ) -> vs.VideoNode :
 
 	func_name = "UAI_MIGX"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(clamp, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 clamp 的值无效")
-	if not isinstance(crc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 crc 的值无效")
-	if len(model_pth) <= 5 :
-		raise vs.Error(f"模块 {func_name} 的子参数 model_pth 的值无效")
-	if not isinstance(fp16_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fp16_qnt 的值无效")
-	if not isinstance(exh_tune, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 exh_tune 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "clamp", clamp)
+	_validate_bool(func_name, "crc", crc)
+	_validate_string_length(func_name, "model_pth", model_pth, 5)
+	_validate_bool(func_name, "fp16_qnt", fp16_qnt)
+	_validate_bool(func_name, "exh_tune", exh_tune)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "migx") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 migx")
@@ -3075,28 +2880,18 @@ def UAI_NV_TRT(
 ) -> vs.VideoNode :
 
 	func_name = "UAI_NV_TRT"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if not isinstance(clamp, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 clamp 的值无效")
-	if not isinstance(crc, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 crc 的值无效")
-	if len(model_pth) <= 5 :
-		raise vs.Error(f"模块 {func_name} 的子参数 model_pth 的值无效")
-	if opt_lv not in [0, 1, 2, 3, 4, 5] :
-		raise vs.Error(f"模块 {func_name} 的子参数 opt_lv 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "clamp", clamp)
+	_validate_bool(func_name, "crc", crc)
+	_validate_string_length(func_name, "model_pth", model_pth, 5)
+	_validate_literal(func_name, "opt_lv", opt_lv, [0, 1, 2, 3, 4, 5])
 	if not (len(cuda_opt) == 3 and all(isinstance(num, int) and num in [0, 1] for num in cuda_opt)) :
 		raise vs.Error(f"模块 {func_name} 的子参数 cuda_opt 的值无效")
-	if not isinstance(int8_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 int8_qnt 的值无效")
-	if not isinstance(fp16_qnt, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 fp16_qnt 的值无效")
-	if gpu not in [0, 1, 2] :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu 的值无效")
-	if not isinstance(gpu_t, int) or gpu_t <= 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 gpu_t 的值无效")
-	if not isinstance(st_eng, bool) :
-		raise vs.Error(f"模块 {func_name} 的子参数 st_eng 的值无效")
+	_validate_bool(func_name, "int8_qnt", int8_qnt)
+	_validate_bool(func_name, "fp16_qnt", fp16_qnt)
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_bool(func_name, "st_eng", st_eng)
 #	if st_eng :
 #		if not (res_opt is None and res_max is None) :
 #			raise vs.Error(f"模块 {func_name} 的子参数 res_opt 或 res_max 的值无效")
@@ -3105,10 +2900,8 @@ def UAI_NV_TRT(
 			raise vs.Error(f"模块 {func_name} 的子参数 res_opt 的值无效")
 		if not (isinstance(res_max, list) and len(res_max) == 2 and all(isinstance(i, int) for i in res_max)) :
 			raise vs.Error(f"模块 {func_name} 的子参数 res_max 的值无效")
-	if not isinstance(ws_size, int) or ws_size < 0 :
-		raise vs.Error(f"模块 {func_name} 的子参数 ws_size 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_numeric(func_name, "ws_size", ws_size, min_val=0, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "trt") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 trt")
@@ -3181,18 +2974,12 @@ def UVR_MAD(
 ) -> vs.VideoNode :
 
 	func_name = "UVR_MAD"
-	if not isinstance(input, vs.VideoNode) :
-		raise vs.Error(f"模块 {func_name} 的子参数 input 的值无效")
-	if ngu not in [0, 1, 2, 3, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 ngu 的值无效")
-	if ngu_q not in [1, 2, 3, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 ngu_q 的值无效")
-	if rca_lv not in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] :
-		raise vs.Error(f"模块 {func_name} 的子参数 rca_lv 的值无效")
-	if rca_q not in [1, 2, 3, 4] :
-		raise vs.Error(f"模块 {func_name} 的子参数 rca_q 的值无效")
-	if not isinstance(vs_t, int) or vs_t > vs_thd_init :
-		raise vs.Error(f"模块 {func_name} 的子参数 vs_t 的值无效")
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "ngu", ngu, [0, 1, 2, 3, 4])
+	_validate_literal(func_name, "ngu_q", ngu_q, [1, 2, 3, 4])
+	_validate_literal(func_name, "rca_lv", rca_lv, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+	_validate_literal(func_name, "rca_q", rca_q, [1, 2, 3, 4])
+	_validate_vs_threads(func_name, vs_t)
 
 	if not hasattr(core, "madvr") :
 		raise ModuleNotFoundError(f"模块 {func_name} 依赖错误：缺失插件，检查项目 madvr")
