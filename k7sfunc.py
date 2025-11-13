@@ -2,7 +2,7 @@
 ### 文档： https://github.com/hooke007/mpv_PlayKit/wiki/3_K7sfunc
 ##################################################
 
-__version__ = "0.10.3"
+__version__ = "0.10.4"
 
 __all__ = [
 	"FMT_CHANGE", "FMT_CTRL",
@@ -1200,6 +1200,125 @@ def RIFE_STD(
 	return output
 
 ##################################################
+## RIFE补帧 # helper
+##################################################
+
+def RIFE_ORT_HUB(
+	input : vs.VideoNode,
+	model : typing.Literal[46, 4251, 426, 4262],
+	turbo : bool,
+	fps_in : float,
+	fps_num : int,
+	fps_den : int,
+	sc_mode : typing.Literal[0, 1, 2],
+	gpu_t : int,
+	backend_type : str,
+	backend_param,
+	func_name : str,
+	vs_t : int = vs_thd_dft,
+) -> vs.VideoNode :
+
+	_validate_input_clip(func_name, input)
+	_validate_literal(func_name, "model", model, [46, 4251, 426, 4262])
+	_validate_bool(func_name, "turbo", turbo)
+	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
+	_validate_numeric(func_name, "fps_num", fps_num, min_val=2, int_only=True)
+	if not isinstance(fps_den, int) or fps_den >= fps_num or fps_num/fps_den <= 1 :
+		raise vs.Error(f"模块 {func_name} 的子参数 fps_den 的值无效")
+	_validate_literal(func_name, "sc_mode", sc_mode, [0, 1, 2])
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
+
+	_check_plugin(func_name, "ort")
+	if sc_mode == 1 :
+		_check_plugin(func_name, "misc")
+	elif sc_mode == 2 :
+		_check_plugin(func_name, "mv")
+
+	if backend_type == "coreml" :
+		## CoreML 缺失 akarin，不支持 ext_proc
+		cond_support = False
+	else :
+		## 其它后端需要 akarin 支持
+		_check_plugin(func_name, "akarin")
+		cond_support = True
+
+	#ext_proc = True
+	#t_tta = False
+	if turbo :
+		ext_proc = False
+		t_tta = False
+	else :
+		ext_proc = cond_support
+		t_tta = True
+
+	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
+	mdl_pname = "rife/" if ext_proc else "rife_v2/"
+	if model in [4251, 426, 4262] :
+		## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1031-L1032
+		t_tta = False
+	if t_tta :
+		mdl_fname = ["rife_v4.6_ensemble"][[46].index(model)]
+	else :
+		mdl_fname = ["rife_v4.6", "rife_v4.25_lite", "rife_v4.26", "rife_v4.26_heavy"][[46, 4251, 426, 4262].index(model)]
+	mdl_pth = plg_dir + "/models/" + mdl_pname + mdl_fname + ".onnx"
+	if not os.path.exists(mdl_pth) :
+		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
+
+	core.num_threads = vs_t
+	w_in, h_in = input.width, input.height
+	size_in = w_in * h_in
+	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	fmt_in = input.format.id
+	fps_factor = fps_num/fps_den
+
+	if (size_in > 4096 * 2176) :
+		raise Exception("源分辨率超过限制的范围，已临时中止。")
+
+	scale_model = 1
+	if (size_in > 2048 * 1088) :
+		scale_model = 0.5
+		if not ext_proc :
+			## https://github.com/AmusementClub/vs-mlrt/blob/abc5b1c777a5dde6bad51a099f28eba99375ef4e/scripts/vsmlrt.py#L1002
+			scale_model = 1
+	if model >= 47 :
+		## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1036-L1037
+		scale_model = 1
+
+	## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1014-L1023
+	tile_size = 32
+	if model == 4251 :
+		tile_size = 128
+	elif model in [426, 4262] :
+		tile_size = 64
+	tile_size = tile_size / scale_model
+	w_tmp = math.ceil(w_in / tile_size) * tile_size - w_in
+	h_tmp = math.ceil(h_in / tile_size) * tile_size - h_in
+
+	cut0 = SCENE_DETECT(input=input, sc_mode=sc_mode)
+	cut1 = core.resize.Point(clip=cut0, format=vs.RGBS, matrix_in_s="709")
+
+	backend = backend_param(ext_proc)
+	if ext_proc :
+		if w_tmp + h_tmp > 0 :
+			cut1 = core.std.AddBorders(clip=cut1, right=w_tmp, bottom=h_tmp)
+		fin = vsmlrt.RIFE(clip=cut1, multi=fractions.Fraction(fps_num, fps_den),
+						  scale=scale_model, model=model, ensemble=t_tta,
+						  _implementation=1, video_player=True, backend=backend)
+		if w_tmp + h_tmp > 0 :
+			fin = core.std.Crop(clip=fin, right=w_tmp, bottom=h_tmp)
+	else :
+		fin = vsmlrt.RIFE(clip=cut1, multi=fractions.Fraction(fps_num, fps_den),
+						  scale=scale_model, model=model, ensemble=t_tta,
+						  _implementation=2, video_player=True, backend=backend)
+
+	output = core.resize.Point(clip=fin, format=fmt_in, matrix_s="709", range=1 if colorlv==0 else None)
+	if not fps_factor.is_integer() :
+		output = core.std.AssumeFPS(clip=output, fpsnum=fps_in * fps_num * 1e6, fpsden=fps_den * 1e6)
+
+	return output
+
+##################################################
 ## RIFE补帧 CoreML
 ##################################################
 
@@ -1217,94 +1336,28 @@ def RIFE_COREML(
 ) -> vs.VideoNode :
 
 	func_name = "RIFE_COREML"
-	_validate_input_clip(func_name, input)
-	_validate_literal(func_name, "model", model, [46, 4251, 426, 4262])
-	_validate_bool(func_name, "turbo", turbo)
-	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
-	_validate_numeric(func_name, "fps_num", fps_num, min_val=2, int_only=True)
-	if not isinstance(fps_den, int) or fps_den >= fps_num or fps_num/fps_den <= 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_den 的值无效")
-	_validate_literal(func_name, "sc_mode", sc_mode, [0, 1, 2])
 	_validate_literal(func_name, "be", be, [0, 1])
-	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
-	_validate_vs_threads(func_name, vs_t)
-
-	_check_plugin(func_name, "ort")
-	if sc_mode == 1 :
-		_check_plugin(func_name, "misc")
-	elif sc_mode == 2 :
-		_check_plugin(func_name, "mv")
-	#_check_plugin(func_name, "akarin")  ## akarin 缺失mac版，会影响其它功能
-	fps_den = 1                          ## akarin 缺失mac版，锁整数倍
-
-	#ext_proc = True
-	#t_tta = False
-	if turbo :
-		ext_proc = False
-		t_tta = False
-	else :
-		ext_proc = False  ## 未知原因 CoreML 无法使用v1实现
-		t_tta = True
-
-	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
-	mdl_pname = "rife/" if ext_proc else "rife_v2/"
-	if model in [4251, 426, 4262] :  ## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1031-L1032
-		t_tta = False
-	if t_tta :
-		mdl_fname = ["rife_v4.6_ensemble"][[46].index(model)]
-	else :
-		mdl_fname = ["rife_v4.6", "rife_v4.25_lite", "rife_v4.26", "rife_v4.26_heavy"][[46, 4251, 426, 4262].index(model)]
-	mdl_pth = plg_dir + "/models/" + mdl_pname + mdl_fname + ".onnx"
-	if not os.path.exists(mdl_pth) :
-		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
 	vsmlrt = _check_script(func_name, "vsmlrt", "3.22.13")
 
-	core.num_threads = vs_t
-	w_in, h_in = input.width, input.height
-	size_in = w_in * h_in
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
-	fmt_in = input.format.id
-	fps_factor = fps_num/fps_den
+	fps_den = 1 ## akarin 缺失mac版，暂锁整数倍
+	def backend_param(ext_proc):
+		return vsmlrt.BackendV2.ORT_COREML(num_streams=gpu_t, fp16=False, ml_program=be) ## CoreML 因未知性能问题禁用fp16
 
-	if (size_in > 4096 * 2176) :
-		raise Exception("源分辨率超过限制的范围，已临时中止。")
-
-	scale_model = 1
-	if (size_in > 2048 * 1088) :
-		scale_model = 0.5
-		if not ext_proc :  ## https://github.com/AmusementClub/vs-mlrt/blob/abc5b1c777a5dde6bad51a099f28eba99375ef4e/scripts/vsmlrt.py#L1002
-			scale_model = 1
-	if model >= 47 :  ## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1036-L1037
-		scale_model = 1
-
-	tile_size = 32  ## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1014-L1023
-	if model == 4251 :
-		tile_size = 128
-	elif model in [426, 4262] :
-		tile_size = 64
-	tile_size = tile_size / scale_model
-	w_tmp = math.ceil(w_in / tile_size) * tile_size - w_in
-	h_tmp = math.ceil(h_in / tile_size) * tile_size - h_in
-
-	cut0 = SCENE_DETECT(input=input, sc_mode=sc_mode)
-
-	cut1 = core.resize.Bilinear(clip=cut0, format=vs.RGBS, matrix_in_s="709")
-	if ext_proc :
-		if w_tmp + h_tmp > 0 :
-			cut1 = core.std.AddBorders(clip=cut1, right=w_tmp, bottom=h_tmp)
-		fin = vsmlrt.RIFE(clip=cut1, multi=fractions.Fraction(fps_num, fps_den), scale=scale_model, model=model, ensemble=t_tta, _implementation=1, video_player=True, backend=vsmlrt.BackendV2.ORT_COREML(
-			num_streams=gpu_t, fp16=False, ml_program=be))  ## CoreML 因未知性能问题先保持fp16禁用
-		if w_tmp + h_tmp > 0 :
-			fin = core.std.Crop(clip=fin, right=w_tmp, bottom=h_tmp)
-	else :
-		fin = vsmlrt.RIFE(clip=cut1, multi=fractions.Fraction(fps_num, fps_den), scale=scale_model, model=model, ensemble=t_tta, _implementation=2, video_player=True, backend=vsmlrt.BackendV2.ORT_COREML(
-			num_streams=gpu_t, fp16=False, ml_program=be))  ## https://github.com/AmusementClub/vs-mlrt/issues/56#issuecomment-2801745592
-	output = core.resize.Bilinear(clip=fin, format=fmt_in, matrix_s="709", range=1 if colorlv==0 else None)
-	if not fps_factor.is_integer() :
-		output = core.std.AssumeFPS(clip=output, fpsnum=fps_in * fps_num * 1e6, fpsden=fps_den * 1e6)
-
-	return output
+	return RIFE_ORT_HUB(
+		input=input,
+		model=model,
+		turbo=turbo,
+		fps_in=fps_in,
+		fps_num=fps_num,
+		fps_den=fps_den,
+		sc_mode=sc_mode,
+		gpu_t=gpu_t,
+		backend_type="coreml",
+		backend_param=backend_param,
+		func_name=func_name,
+		vs_t=vs_t,
+	)
 
 ##################################################
 ## RIFE补帧 DirectML
@@ -1324,93 +1377,28 @@ def RIFE_DML(
 ) -> vs.VideoNode :
 
 	func_name = "RIFE_DML"
-	_validate_input_clip(func_name, input)
-	_validate_literal(func_name, "model", model, [46, 4251, 426, 4262])
-	_validate_bool(func_name, "turbo", turbo)
-	_validate_numeric(func_name, "fps_in", fps_in, min_val=0.0, exclusive_min=True)
-	_validate_numeric(func_name, "fps_num", fps_num, min_val=2, int_only=True)
-	if not isinstance(fps_den, int) or fps_den >= fps_num or fps_num/fps_den <= 1 :
-		raise vs.Error(f"模块 {func_name} 的子参数 fps_den 的值无效")
-	_validate_literal(func_name, "sc_mode", sc_mode, [0, 1, 2])
 	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
-	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
-	_validate_vs_threads(func_name, vs_t)
-
-	_check_plugin(func_name, "ort")
-	if sc_mode == 1 :
-		_check_plugin(func_name, "misc")
-	elif sc_mode == 2 :
-		_check_plugin(func_name, "mv")
-	_check_plugin(func_name, "akarin")
-
-	#ext_proc = True
-	#t_tta = False
-	if turbo :
-		ext_proc = False
-		t_tta = False
-	else :
-		ext_proc = True
-		t_tta = True
-
-	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
-	mdl_pname = "rife/" if ext_proc else "rife_v2/"
-	if model in [4251, 426, 4262] :  ## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1031-L1032
-		t_tta = False
-	if t_tta :
-		mdl_fname = ["rife_v4.6_ensemble"][[46].index(model)]
-	else :
-		mdl_fname = ["rife_v4.6", "rife_v4.25_lite", "rife_v4.26", "rife_v4.26_heavy"][[46, 4251, 426, 4262].index(model)]
-	mdl_pth = plg_dir + "/models/" + mdl_pname + mdl_fname + ".onnx"
-	if not os.path.exists(mdl_pth) :
-		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
 
 	vsmlrt = _check_script(func_name, "vsmlrt", "3.22.13")
 
-	core.num_threads = vs_t
-	w_in, h_in = input.width, input.height
-	size_in = w_in * h_in
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
-	fmt_in = input.format.id
-	fps_factor = fps_num/fps_den
+	def backend_param(ext_proc):
+		fp16 = True if ext_proc else False ## https://github.com/AmusementClub/vs-mlrt/issues/56#issuecomment-2801745592
+		return vsmlrt.BackendV2.ORT_DML(num_streams=gpu_t, fp16=fp16, device_id=gpu)
 
-	if (size_in > 4096 * 2176) :
-		raise Exception("源分辨率超过限制的范围，已临时中止。")
-
-	scale_model = 1
-	if (size_in > 2048 * 1088) :
-		scale_model = 0.5
-		if not ext_proc :  ## https://github.com/AmusementClub/vs-mlrt/blob/abc5b1c777a5dde6bad51a099f28eba99375ef4e/scripts/vsmlrt.py#L1002
-			scale_model = 1
-	if model >= 47 :  ## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1036-L1037
-		scale_model = 1
-
-	tile_size = 32  ## https://github.com/AmusementClub/vs-mlrt/blob/2adfbab790eebe51c62c886400b0662570dfe3e9/scripts/vsmlrt.py#L1014-L1023
-	if model == 4251 :
-		tile_size = 128
-	elif model in [426, 4262] :
-		tile_size = 64
-	tile_size = tile_size / scale_model
-	w_tmp = math.ceil(w_in / tile_size) * tile_size - w_in
-	h_tmp = math.ceil(h_in / tile_size) * tile_size - h_in
-
-	cut0 = SCENE_DETECT(input=input, sc_mode=sc_mode)
-
-	cut1 = core.resize.Bilinear(clip=cut0, format=vs.RGBS, matrix_in_s="709")
-	if ext_proc :
-		if w_tmp + h_tmp > 0 :
-			cut1 = core.std.AddBorders(clip=cut1, right=w_tmp, bottom=h_tmp)
-		fin = vsmlrt.RIFE(clip=cut1, multi=fractions.Fraction(fps_num, fps_den), scale=scale_model, model=model, ensemble=t_tta, _implementation=1, video_player=True, backend=vsmlrt.BackendV2.ORT_DML(
-			num_streams=gpu_t, fp16=True, device_id=gpu))
-		if w_tmp + h_tmp > 0 :
-			fin = core.std.Crop(clip=fin, right=w_tmp, bottom=h_tmp)
-	else :
-		fin = vsmlrt.RIFE(clip=cut1, multi=fractions.Fraction(fps_num, fps_den), scale=scale_model, model=model, ensemble=t_tta, _implementation=2, video_player=True, backend=vsmlrt.BackendV2.ORT_DML(
-			num_streams=gpu_t, fp16=False, device_id=gpu))  ## https://github.com/AmusementClub/vs-mlrt/issues/56#issuecomment-2801745592
-	output = core.resize.Bilinear(clip=fin, format=fmt_in, matrix_s="709", range=1 if colorlv==0 else None)
-	if not fps_factor.is_integer() :
-		output = core.std.AssumeFPS(clip=output, fpsnum=fps_in * fps_num * 1e6, fpsden=fps_den * 1e6)
-
-	return output
+	return RIFE_ORT_HUB(
+		input=input,
+		model=model,
+		turbo=turbo,
+		fps_in=fps_in,
+		fps_num=fps_num,
+		fps_den=fps_den,
+		sc_mode=sc_mode,
+		gpu_t=gpu_t,
+		backend_type="dml",
+		backend_param=backend_param,
+		func_name=func_name,
+		vs_t=vs_t,
+	)
 
 ##################################################
 ## RIFE补帧 TensorRT
@@ -1850,6 +1838,47 @@ def BILA_NV(
 	return output
 
 ##################################################
+## BM3D降噪 # helper
+##################################################
+
+def BM3D_HUB(
+	input : vs.VideoNode,
+	nr_lv : typing.List[int],
+	bs_ref : typing.Literal[1, 2, 3, 4, 5, 6, 7, 8],
+	bs_out : typing.Literal[1, 2, 3, 4, 5, 6, 7, 8],
+	gpu : typing.Literal[0, 1, 2],
+	plugin_name : str,
+	func_name : str,
+	vs_t : int = vs_thd_dft,
+) -> vs.VideoNode :
+
+	_validate_input_clip(func_name, input)
+	if not (isinstance(nr_lv, list) and len(nr_lv) == 3 and all(isinstance(i, int) for i in nr_lv)) :
+		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
+	_validate_literal(func_name, "bs_ref", bs_ref, [1, 2, 3, 4, 5, 6, 7, 8])
+	if bs_out not in [1, 2, 3, 4, 5, 6, 7, 8] or bs_out >= bs_ref :
+		raise vs.Error(f"模块 {func_name} 的子参数 bs_out 的值无效")
+	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
+	_validate_vs_threads(func_name, vs_t)
+
+	_check_plugin(func_name, plugin_name)
+
+	core.num_threads = vs_t
+	fmt_in = input.format.id
+
+	if plugin_name == "bm3dmetal" :
+		bm3d_plugin = core.bm3dmetal
+	elif plugin_name == "bm3dcuda_rtc" :
+		bm3d_plugin = core.bm3dcuda_rtc
+
+	cut0 = core.resize.Point(clip=input, format=vs.YUV444PS)
+	ref = bm3d_plugin.BM3D(clip=cut0, sigma=nr_lv, block_step=bs_ref, device_id=gpu)
+	cut1 = bm3d_plugin.BM3D(clip=cut0, ref=ref, sigma=nr_lv, block_step=bs_out, device_id=gpu)
+	output = core.resize.Point(clip=cut1, format=fmt_in)
+
+	return output
+
+##################################################
 ## BM3D降噪 Metal
 ##################################################
 
@@ -1863,26 +1892,17 @@ def BM3D_METAL(
 ) -> vs.VideoNode :
 
 	func_name = "BM3D_METAL"
-	_validate_input_clip(func_name, input)
-	if not (isinstance(nr_lv, list) and len(nr_lv) == 3 and all(isinstance(i, int) for i in nr_lv)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	_validate_literal(func_name, "bs_ref", bs_ref, [1, 2, 3, 4, 5, 6, 7, 8])
-	if bs_out not in [1, 2, 3, 4, 5, 6, 7, 8] or bs_out >= bs_ref :
-		raise vs.Error(f"模块 {func_name} 的子参数 bs_out 的值无效")
-	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
-	_validate_vs_threads(func_name, vs_t)
 
-	_check_plugin(func_name, "bm3dmetal")
-
-	core.num_threads = vs_t
-	fmt_in = input.format.id
-
-	cut0 = core.resize.Bilinear(clip=input, format=vs.YUV444PS)
-	ref = core.bm3dmetal.BM3D(clip=cut0, sigma=nr_lv, block_step=bs_ref, device_id=gpu)
-	cut1 = core.bm3dmetal.BM3D(clip=cut0, ref=ref, sigma=nr_lv, block_step=bs_out, device_id=gpu)
-	output = core.resize.Bilinear(clip=cut1, format=fmt_in)
-
-	return output
+	return BM3D_HUB(
+		input=input,
+		nr_lv=nr_lv,
+		bs_ref=bs_ref,
+		bs_out=bs_out,
+		gpu=gpu,
+		plugin_name="bm3dmetal",
+		func_name=func_name,
+		vs_t=vs_t,
+	)
 
 ##################################################
 ## BM3D降噪 CUDA
@@ -1898,26 +1918,17 @@ def BM3D_NV(
 ) -> vs.VideoNode :
 
 	func_name = "BM3D_NV"
-	_validate_input_clip(func_name, input)
-	if not (isinstance(nr_lv, list) and len(nr_lv) == 3 and all(isinstance(i, int) for i in nr_lv)) :
-		raise vs.Error(f"模块 {func_name} 的子参数 nr_lv 的值无效")
-	_validate_literal(func_name, "bs_ref", bs_ref, [1, 2, 3, 4, 5, 6, 7, 8])
-	if bs_out not in [1, 2, 3, 4, 5, 6, 7, 8] or bs_out >= bs_ref :
-		raise vs.Error(f"模块 {func_name} 的子参数 bs_out 的值无效")
-	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
-	_validate_vs_threads(func_name, vs_t)
 
-	_check_plugin(func_name, "bm3dcuda_rtc")
-
-	core.num_threads = vs_t
-	fmt_in = input.format.id
-
-	cut0 = core.resize.Bilinear(clip=input, format=vs.YUV444PS)
-	ref = core.bm3dcuda_rtc.BM3D(clip=cut0, sigma=nr_lv, block_step=bs_ref, device_id=gpu)
-	cut1 = core.bm3dcuda_rtc.BM3D(clip=cut0, ref=ref, sigma=nr_lv, block_step=bs_out, device_id=gpu)
-	output = core.resize.Bilinear(clip=cut1, format=fmt_in)
-
-	return output
+	return BM3D_HUB(
+		input=input,
+		nr_lv=nr_lv,
+		bs_ref=bs_ref,
+		bs_out=bs_out,
+		gpu=gpu,
+		plugin_name="bm3dcuda_rtc",
+		func_name=func_name,
+		vs_t=vs_t,
+	)
 
 ##################################################
 ## PORT jvsfunc (7bed2d843fd513505b209470fd82c71ef8bcc0dd)
@@ -2761,7 +2772,62 @@ def STAB_HQ(
 	return output
 
 ##################################################
-## 自定义ONNX模型（仅支持放大类）
+## 自定义ONNX模型 # helper
+##################################################
+
+def UAI_ORT_HUB(
+	input : vs.VideoNode,
+	crc : bool,
+	model_pth : str,
+	fp16_qnt : bool,
+	gpu_t : int,
+	backend_param,
+	func_name : str,
+	vs_t : int = vs_thd_dft,
+) -> vs.VideoNode :
+
+	_validate_input_clip(func_name, input)
+	_validate_bool(func_name, "crc", crc)
+	_validate_string_length(func_name, "model_pth", model_pth, 5)
+	_validate_bool(func_name, "fp16_qnt", fp16_qnt)
+	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
+	_validate_vs_threads(func_name, vs_t)
+
+	_check_plugin(func_name, "ort")
+
+	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
+	mdl_pth_rel = plg_dir + "/models/" + model_pth
+	if not os.path.exists(mdl_pth_rel) and not os.path.exists(model_pth) :
+		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
+	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
+
+	core.num_threads = vs_t
+	fmt_in = input.format.id
+	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+
+	fp16_mdl = None
+	check_mdl = ONNX_ANZ(input=mdl_pth)
+	if check_mdl == 1 :
+		fp16_mdl = False
+	elif check_mdl == 10 :
+		fp16_mdl = True
+	else :
+		raise vs.Error(f"模块 {func_name} 的输入模型的输入精度不受支持")
+	if fp16_mdl :
+		fp16_qnt = False ## ort对于fp16模型自动使用对应的IO
+
+	clip = core.resize.Point(clip=input, format=vs.RGBH if fp16_mdl else vs.RGBS, matrix_in_s="709")
+	be_param = backend_param(fp16_qnt)
+	infer = vsmlrt.inference(clips=clip, network_path=mdl_pth, backend=be_param)
+
+	if crc :
+		infer = DCF(input=infer, ref=clip)
+	output = core.resize.Point(clip=infer, format=fmt_in, matrix_s="709", range=1 if colorlv==0 else None)
+
+	return output
+
+##################################################
+## 自定义ONNX模型（仅支持放大类） CoreML
 ##################################################
 
 def UAI_COREML(
@@ -2775,51 +2841,27 @@ def UAI_COREML(
 ) -> vs.VideoNode :
 
 	func_name = "UAI_COREML"
-	_validate_input_clip(func_name, input)
-	_validate_bool(func_name, "crc", crc)
-	_validate_string_length(func_name, "model_pth", model_pth, 5)
-	_validate_bool(func_name, "fp16_qnt", fp16_qnt)
 	_validate_literal(func_name, "be", be, [0, 1])
-	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
-	_validate_vs_threads(func_name, vs_t)
-
-	_check_plugin(func_name, "ort")
-
-	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
-	mdl_pth_rel = plg_dir + "/models/" + model_pth
-	if not os.path.exists(mdl_pth_rel) and not os.path.exists(model_pth) :
-		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
-	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
 
 	vsmlrt = _check_script(func_name, "vsmlrt", "3.15.25")
 
-	core.num_threads = vs_t
-	fmt_in = input.format.id
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	def backend_param(fp16_qnt):
+		## fp16模型或量化都存在未知的性能问题，暂时建议维持fp32链路
+		return vsmlrt.BackendV2.ORT_COREML(ml_program=be, num_streams=gpu_t, fp16=fp16_qnt)
 
-	fp16_mdl = None
-	check_mdl = ONNX_ANZ(input=mdl_pth)
-	if check_mdl == 1 :
-		fp16_mdl = False
-	elif check_mdl == 10 :
-		fp16_mdl = True
-	else :
-		raise vs.Error(f"模块 {func_name} 的输入模型的输入精度不受支持")
-	if fp16_mdl :
-		fp16_qnt = False   ### ort对于fp16模型自动使用对应的IO
-
-	clip = core.resize.Bilinear(clip=input, format=vs.RGBH if fp16_mdl else vs.RGBS, matrix_in_s="709")
-	be_param = vsmlrt.BackendV2.ORT_COREML(ml_program=be, num_streams=gpu_t, fp16=fp16_qnt)   ### fp16模型或量化都存在未知的性能问题
-	infer = vsmlrt.inference(clips=clip, network_path=mdl_pth, backend=be_param)
-
-	if crc :
-		infer = DCF(input=infer, ref=clip)
-	output = core.resize.Bilinear(clip=infer, format=fmt_in, matrix_s="709", range=1 if colorlv==0 else None)
-
-	return output
+	return UAI_ORT_HUB(
+		input=input,
+		crc=crc,
+		model_pth=model_pth,
+		fp16_qnt=fp16_qnt,
+		gpu_t=gpu_t,
+		backend_param=backend_param,
+		func_name=func_name,
+		vs_t=vs_t,
+	)
 
 ##################################################
-## 自定义ONNX模型（仅支持放大类）
+## 自定义ONNX模型（仅支持放大类） DirectML
 ##################################################
 
 def UAI_DML(
@@ -2833,48 +2875,23 @@ def UAI_DML(
 ) -> vs.VideoNode :
 
 	func_name = "UAI_DML"
-	_validate_input_clip(func_name, input)
-	_validate_bool(func_name, "crc", crc)
-	_validate_string_length(func_name, "model_pth", model_pth, 5)
-	_validate_bool(func_name, "fp16_qnt", fp16_qnt)
 	_validate_literal(func_name, "gpu", gpu, [0, 1, 2])
-	_validate_numeric(func_name, "gpu_t", gpu_t, min_val=1, int_only=True)
-	_validate_vs_threads(func_name, vs_t)
-
-	_check_plugin(func_name, "ort")
-
-	plg_dir = os.path.dirname(core.ort.Version()["path"]).decode()
-	mdl_pth_rel = plg_dir + "/models/" + model_pth
-	if not os.path.exists(mdl_pth_rel) and not os.path.exists(model_pth) :
-		raise vs.Error(f"模块 {func_name} 所请求的模型缺失")
-	mdl_pth = mdl_pth_rel if os.path.exists(mdl_pth_rel) else model_pth
 
 	vsmlrt = _check_script(func_name, "vsmlrt", "3.15.25")
 
-	core.num_threads = vs_t
-	fmt_in = input.format.id
-	colorlv = getattr(input.get_frame(0).props, "_ColorRange", 0)
+	def backend_param(fp16_qnt):
+		return vsmlrt.BackendV2.ORT_DML(device_id=gpu, num_streams=gpu_t, fp16=fp16_qnt)
 
-	fp16_mdl = None
-	check_mdl = ONNX_ANZ(input=mdl_pth)
-	if check_mdl == 1 :
-		fp16_mdl = False
-	elif check_mdl == 10 :
-		fp16_mdl = True
-	else :
-		raise vs.Error(f"模块 {func_name} 的输入模型的输入精度不受支持")
-	if fp16_mdl :
-		fp16_qnt = False   ### ort对于fp16模型自动使用对应的IO
-
-	clip = core.resize.Bilinear(clip=input, format=vs.RGBH if fp16_mdl else vs.RGBS, matrix_in_s="709")
-	be_param = vsmlrt.BackendV2.ORT_DML(device_id=gpu, num_streams=gpu_t, fp16=fp16_qnt)
-	infer = vsmlrt.inference(clips=clip, network_path=mdl_pth, backend=be_param)
-
-	if crc :
-		infer = DCF(input=infer, ref=clip)
-	output = core.resize.Bilinear(clip=infer, format=fmt_in, matrix_s="709", range=1 if colorlv==0 else None)
-
-	return output
+	return UAI_ORT_HUB(
+		input=input,
+		crc=crc,
+		model_pth=model_pth,
+		fp16_qnt=fp16_qnt,
+		gpu_t=gpu_t,
+		backend_param=backend_param,
+		func_name=func_name,
+		vs_t=vs_t,
+	)
 
 ##################################################
 ## 自定义ONNX模型（仅支持放大类）
