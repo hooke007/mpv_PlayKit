@@ -820,7 +820,7 @@ mp.observe_property('eof-reached', 'native', create_state_setter('eof_reached'))
 mp.observe_property('core-idle', 'native', create_state_setter('core_idle'))
 
 -- 互斥1：mpv osd菜单打开时关闭 uosc 菜单
--- 非互斥版实现 https://github.com/tomasklaen/uosc/commit/95dd6085643f009e8bdb4976fce32a0afc489511
+-- 上游的解决方案 https://github.com/tomasklaen/uosc/commit/1577492f136b41b3a5c47e54dea7275ab7a6fce4
 mp.observe_property('user-data/mpv/context-menu/open', 'bool', function(_, value)
 	if value == true and Menu:is_open() then Menu:close() end
 end)

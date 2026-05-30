@@ -4,6 +4,8 @@ local cursor = {
 	x = math.huge,
 	y = math.huge,
 	hidden = true,
+	disabled = false,
+	disablers = {}, -- List of ids. When not empty, the cursor handling is disabled.
 	distance = 0, -- Distance traveled during current move. Reset by `cursor.distance_reset_timer`.
 	last_hover = false, -- Stores `mouse.hover` boolean of the last mouse event for enter/leave detection.
 	-- Event handlers that are only fired on zones defined during render loop.
@@ -404,11 +406,27 @@ function cursor:direction_to_rectangle_distance(rect)
 	return get_ray_to_rectangle_distance(self.x, self.y, end_x, end_y, rect)
 end
 
+---@param id string
+function cursor:register_disabler(id)
+	self.disablers[#self.disablers + 1] = id
+	if #self.disablers > 0 then
+		cursor.disabled = true
+		self:leave()
+	end
+end
+
+---@param id string
+function cursor:unregister_disabler(id)
+	self.disablers = itable_filter(self.disablers, function(item) return item ~= id end)
+	if #self.disablers == 0 then cursor.disabled = false end
+end
+
 ---@param event string
 ---@param shortcut Shortcut
 ---@param cb? fun(shortcut: Shortcut)
 function cursor:create_handler(event, shortcut, cb)
 	return function()
+		if self.disabled then return end
 		if cb then cb(shortcut) end
 		self:trigger(event, shortcut)
 	end
@@ -416,7 +434,7 @@ end
 
 -- Movement
 local function handle_mouse_pos(_, mouse)
-	if not mouse then return end
+	if not mouse or cursor.disabled then return end
 	if cursor.last_hover and not mouse.hover then
 		cursor:leave()
 	elseif not (cursor.last_hover == false and mouse.hover == false) then -- filters out duplicate mouse out events
@@ -426,7 +444,7 @@ local function handle_mouse_pos(_, mouse)
 end
 
 local function handle_touch_pos(_, touches)
-	if not touches then return end
+	if not touches or cursor.disabled then return end
 	local touch = touches[1]
 	if touch then
 		cursor:move(touch.x, touch.y)
@@ -465,5 +483,16 @@ mp.set_key_bindings({
 	{'wheel_up', cursor:create_handler('wheel_up', create_shortcut('wheel_up'))},
 	{'wheel_down', cursor:create_handler('wheel_down', create_shortcut('wheel_down'))},
 }, 'wheel', 'force')
+
+-- Monitor mpv UI's and disable uosc's cursor handling when any are open
+-- 已禁用：采用 main.lua / Menu.lua 的互斥方案，故不启用上游的「禁用光标处理」行为
+--mp.observe_property('user-data/mpv/context-menu/open', 'bool', function(_, value)
+--	if value == true then cursor:register_disabler('context-menu')
+--	else cursor:unregister_disabler('context-menu') end
+--end)
+--mp.observe_property('user-data/mpv/console/open', 'bool', function(_, value)
+--	if value == true then cursor:register_disabler('console')
+--	else cursor:unregister_disabler('console') end
+--end)
 
 return cursor
