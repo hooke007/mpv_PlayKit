@@ -1584,7 +1584,7 @@ function Menu:render()
 
 						-- Select action on cursor hover
 						if self.mouse_nav and get_point_to_rectangle_proximity(cursor, rect) <= 0 then
-							cursor:zone('primary_down', rect, self:create_action(function(shortcut)
+							cursor:zone('primary_click', rect, self:create_action(function(shortcut)
 								self:activate_selected_item(shortcut, true)
 							end))
 							blur_action_index = false

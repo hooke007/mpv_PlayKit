@@ -54,15 +54,14 @@ do
 
 	-- alphanum sorting for humans in Lua
 	-- http://notebook.kulchenko.com/algorithms/alphanumeric-natural-sorting-for-humans-in-lua
-	local function padnum(n, d)
-		return #d > 0 and ('%03d%s%.12f'):format(#n, n, tonumber(d) / (10 ^ #d))
-			or ('%03d%s'):format(#n, n)
+	local function padnum(n)
+		return ("%03d%s"):format(#n, n)
 	end
 
 	local function sort_lua(strings)
 		local tuples = {}
 		for i, f in ipairs(strings) do
-			tuples[i] = {f:lower():gsub('0*(%d+)%.?(%d*)', padnum), f}
+			tuples[i] = {f:lower():gsub('0*(%d+)', padnum), f}
 		end
 		table.sort(tuples, function(a, b)
 			return a[1] == b[1] and #b[2] < #a[2] or a[1] < b[1]
