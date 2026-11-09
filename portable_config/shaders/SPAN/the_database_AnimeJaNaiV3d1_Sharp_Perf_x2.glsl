@@ -29,36 +29,36 @@ const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
 vec4 weightAt(ivec2 p) { return texelFetch(W_conv_1_1_eval_conv, p, 0); }
-float sourceAt(ivec2 p, int channel) {
-    ivec2 inputSize = ivec2(MAIN_size);
-    if (p.x >= inputSize.x) p.x = max(0, inputSize.x - 2);
-    if (p.y >= inputSize.y) p.y = max(0, inputSize.y - 2);
+float sourceAt(ivec2 p, int channel, ivec2 maxInput) {
+    p = min(p, maxInput);
     return (MAIN_mul * texelFetch(MAIN_raw, p, 0))[channel];
 }
-vec4 unshuffle(ivec2 p, int sourceChannel) {
+vec4 unshuffle(ivec2 p, int sourceChannel, ivec2 maxInput) {
     ivec2 base = p * 2;
-    return vec4(sourceAt(base + ivec2(0, 0), sourceChannel),
-                sourceAt(base + ivec2(1, 0), sourceChannel),
-                sourceAt(base + ivec2(0, 1), sourceChannel),
-                sourceAt(base + ivec2(1, 1), sourceChannel));
+    return vec4(sourceAt(base + ivec2(0, 0), sourceChannel, maxInput),
+                sourceAt(base + ivec2(1, 0), sourceChannel, maxInput),
+                sourceAt(base + ivec2(0, 1), sourceChannel, maxInput),
+                sourceAt(base + ivec2(1, 1), sourceChannel, maxInput));
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return unshuffle(p, group);
+vec4 loadInput(ivec2 p, int group, ivec2 maxInput) {
+    return unshuffle(p, group, maxInput);
 }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, ivec2 maxInput, int outGroup) {
     vec4 sum = weightAt(ivec2(108, outGroup));
     for (int ky = 0; ky < 3; ++ky) {
         for (int kx = 0; kx < 3; ++kx) {
             ivec2 q = p + ivec2(kx - 1, ky - 1);
-            for (int ig = 0; ig < 3; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * 3 + kx) * 12 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 3; ++ig) {
+                    vec4 v = loadInput(q, ig, maxInput);
+                    int wi = (ky * 3 + kx) * 12 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -68,9 +68,10 @@ void hook() {
     ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
     if (any(greaterThanEqual(gid, imageSize(out_image)))) return;
     ivec2 s = featureSize();
+    ivec2 maxInput = max(ivec2(0), ivec2(MAIN_size) - ivec2(2));
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    imageStore(out_image, gid, convolve(p, outGroup));
+    imageStore(out_image, gid, convolve(p, s, maxInput, outGroup));
 }
 
 //!HOOK MAIN
@@ -88,28 +89,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_stem_raw, atlasCoord(p, group), 0) * span_stem_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_stem_raw, atlasCoord(p, group, s), 0) * span_stem_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_1_c1_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -121,7 +123,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -141,28 +143,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b1_c1_relu_raw, atlasCoord(p, group), 0) * span_b1_c1_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b1_c1_relu_raw, atlasCoord(p, group, s), 0) * span_b1_c1_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_1_c2_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -174,7 +177,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -194,28 +197,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b1_c2_relu_raw, atlasCoord(p, group), 0) * span_b1_c2_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b1_c2_relu_raw, atlasCoord(p, group, s), 0) * span_b1_c2_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_1_c3_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -227,7 +231,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     imageStore(out_image, gid, value);
 }
 
@@ -245,17 +249,20 @@ void hook() {
 //!COMPUTE 8 8
 
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) { ivec2 s = featureSize(); return p + ivec2(group % 4, group / 4) * s; }
-vec4 loadC3(ivec2 p, int g) { return texelFetch(span_b1_c3_raw, atlasCoord(p, g), 0) * span_b1_c3_mul; }
-vec4 loadSkip(ivec2 p, int g) { return texelFetch(span_stem_raw, atlasCoord(p, g), 0) * span_stem_mul; }
+ivec2 atlasOrigin(int group, ivec2 s) { return ivec2(group % 4, group / 4) * s; }
+vec4 loadC3(ivec2 p, ivec2 origin) { return texelFetch(span_b1_c3_raw, p + origin, 0) * span_b1_c3_mul; }
+vec4 loadSkip(ivec2 p, ivec2 origin) { return texelFetch(span_stem_raw, p + origin, 0) * span_stem_mul; }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_1_att_conv, p, 0); }
-vec4 attention(ivec2 p, int outGroup) {
+vec4 attention(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(48, outGroup));
     for (int ig = 0; ig < 12; ++ig) {
-        vec4 v = loadC3(p, ig);
+        vec4 v = loadC3(p, atlasOrigin(ig, s));
         int wi = ig * 4;
-        sum += mat4(weightAt(ivec2(wi + 0, outGroup)), weightAt(ivec2(wi + 1, outGroup)),
-                     weightAt(ivec2(wi + 2, outGroup)), weightAt(ivec2(wi + 3, outGroup))) * v;
+        vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+        vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+        vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+        vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+        sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
     }
     return sum;
 }
@@ -265,7 +272,8 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = (loadSkip(p, outGroup) + loadC3(p, outGroup)) * tanh(attention(p, outGroup));
+    ivec2 origin = atlasOrigin(outGroup, s);
+    vec4 value = (loadSkip(p, origin) + loadC3(p, origin)) * tanh(attention(p, s, outGroup));
     imageStore(out_image, gid, value);
 }
 
@@ -284,28 +292,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b1_out_raw, atlasCoord(p, group), 0) * span_b1_out_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b1_out_raw, atlasCoord(p, group, s), 0) * span_b1_out_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_2_c1_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -317,7 +326,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -337,28 +346,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b2_c1_relu_raw, atlasCoord(p, group), 0) * span_b2_c1_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b2_c1_relu_raw, atlasCoord(p, group, s), 0) * span_b2_c1_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_2_c2_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -370,7 +380,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -390,28 +400,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b2_c2_relu_raw, atlasCoord(p, group), 0) * span_b2_c2_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b2_c2_relu_raw, atlasCoord(p, group, s), 0) * span_b2_c2_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_2_c3_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -423,7 +434,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     imageStore(out_image, gid, value);
 }
 
@@ -441,17 +452,20 @@ void hook() {
 //!COMPUTE 8 8
 
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) { ivec2 s = featureSize(); return p + ivec2(group % 4, group / 4) * s; }
-vec4 loadC3(ivec2 p, int g) { return texelFetch(span_b2_c3_raw, atlasCoord(p, g), 0) * span_b2_c3_mul; }
-vec4 loadSkip(ivec2 p, int g) { return texelFetch(span_b1_out_raw, atlasCoord(p, g), 0) * span_b1_out_mul; }
+ivec2 atlasOrigin(int group, ivec2 s) { return ivec2(group % 4, group / 4) * s; }
+vec4 loadC3(ivec2 p, ivec2 origin) { return texelFetch(span_b2_c3_raw, p + origin, 0) * span_b2_c3_mul; }
+vec4 loadSkip(ivec2 p, ivec2 origin) { return texelFetch(span_b1_out_raw, p + origin, 0) * span_b1_out_mul; }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_2_att_conv, p, 0); }
-vec4 attention(ivec2 p, int outGroup) {
+vec4 attention(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(48, outGroup));
     for (int ig = 0; ig < 12; ++ig) {
-        vec4 v = loadC3(p, ig);
+        vec4 v = loadC3(p, atlasOrigin(ig, s));
         int wi = ig * 4;
-        sum += mat4(weightAt(ivec2(wi + 0, outGroup)), weightAt(ivec2(wi + 1, outGroup)),
-                     weightAt(ivec2(wi + 2, outGroup)), weightAt(ivec2(wi + 3, outGroup))) * v;
+        vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+        vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+        vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+        vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+        sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
     }
     return sum;
 }
@@ -461,7 +475,8 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = (loadSkip(p, outGroup) + loadC3(p, outGroup)) * tanh(attention(p, outGroup));
+    ivec2 origin = atlasOrigin(outGroup, s);
+    vec4 value = (loadSkip(p, origin) + loadC3(p, origin)) * tanh(attention(p, s, outGroup));
     imageStore(out_image, gid, value);
 }
 
@@ -480,28 +495,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b2_out_raw, atlasCoord(p, group), 0) * span_b2_out_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b2_out_raw, atlasCoord(p, group, s), 0) * span_b2_out_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_3_c1_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -513,7 +529,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -533,28 +549,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b3_c1_relu_raw, atlasCoord(p, group), 0) * span_b3_c1_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b3_c1_relu_raw, atlasCoord(p, group, s), 0) * span_b3_c1_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_3_c2_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -566,7 +583,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -586,28 +603,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b3_c2_relu_raw, atlasCoord(p, group), 0) * span_b3_c2_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b3_c2_relu_raw, atlasCoord(p, group, s), 0) * span_b3_c2_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_3_c3_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -619,7 +637,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     imageStore(out_image, gid, value);
 }
 
@@ -637,17 +655,20 @@ void hook() {
 //!COMPUTE 8 8
 
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) { ivec2 s = featureSize(); return p + ivec2(group % 4, group / 4) * s; }
-vec4 loadC3(ivec2 p, int g) { return texelFetch(span_b3_c3_raw, atlasCoord(p, g), 0) * span_b3_c3_mul; }
-vec4 loadSkip(ivec2 p, int g) { return texelFetch(span_b2_out_raw, atlasCoord(p, g), 0) * span_b2_out_mul; }
+ivec2 atlasOrigin(int group, ivec2 s) { return ivec2(group % 4, group / 4) * s; }
+vec4 loadC3(ivec2 p, ivec2 origin) { return texelFetch(span_b3_c3_raw, p + origin, 0) * span_b3_c3_mul; }
+vec4 loadSkip(ivec2 p, ivec2 origin) { return texelFetch(span_b2_out_raw, p + origin, 0) * span_b2_out_mul; }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_3_att_conv, p, 0); }
-vec4 attention(ivec2 p, int outGroup) {
+vec4 attention(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(48, outGroup));
     for (int ig = 0; ig < 12; ++ig) {
-        vec4 v = loadC3(p, ig);
+        vec4 v = loadC3(p, atlasOrigin(ig, s));
         int wi = ig * 4;
-        sum += mat4(weightAt(ivec2(wi + 0, outGroup)), weightAt(ivec2(wi + 1, outGroup)),
-                     weightAt(ivec2(wi + 2, outGroup)), weightAt(ivec2(wi + 3, outGroup))) * v;
+        vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+        vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+        vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+        vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+        sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
     }
     return sum;
 }
@@ -657,7 +678,8 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = (loadSkip(p, outGroup) + loadC3(p, outGroup)) * tanh(attention(p, outGroup));
+    ivec2 origin = atlasOrigin(outGroup, s);
+    vec4 value = (loadSkip(p, origin) + loadC3(p, origin)) * tanh(attention(p, s, outGroup));
     imageStore(out_image, gid, value);
 }
 
@@ -676,28 +698,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b3_out_raw, atlasCoord(p, group), 0) * span_b3_out_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b3_out_raw, atlasCoord(p, group, s), 0) * span_b3_out_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_4_c1_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -709,7 +732,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -729,28 +752,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b4_c1_relu_raw, atlasCoord(p, group), 0) * span_b4_c1_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b4_c1_relu_raw, atlasCoord(p, group, s), 0) * span_b4_c1_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_4_c2_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -762,7 +786,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -782,28 +806,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b4_c2_relu_raw, atlasCoord(p, group), 0) * span_b4_c2_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b4_c2_relu_raw, atlasCoord(p, group, s), 0) * span_b4_c2_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_4_c3_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -815,7 +840,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     imageStore(out_image, gid, value);
 }
 
@@ -833,17 +858,20 @@ void hook() {
 //!COMPUTE 8 8
 
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) { ivec2 s = featureSize(); return p + ivec2(group % 4, group / 4) * s; }
-vec4 loadC3(ivec2 p, int g) { return texelFetch(span_b4_c3_raw, atlasCoord(p, g), 0) * span_b4_c3_mul; }
-vec4 loadSkip(ivec2 p, int g) { return texelFetch(span_b3_out_raw, atlasCoord(p, g), 0) * span_b3_out_mul; }
+ivec2 atlasOrigin(int group, ivec2 s) { return ivec2(group % 4, group / 4) * s; }
+vec4 loadC3(ivec2 p, ivec2 origin) { return texelFetch(span_b4_c3_raw, p + origin, 0) * span_b4_c3_mul; }
+vec4 loadSkip(ivec2 p, ivec2 origin) { return texelFetch(span_b3_out_raw, p + origin, 0) * span_b3_out_mul; }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_4_att_conv, p, 0); }
-vec4 attention(ivec2 p, int outGroup) {
+vec4 attention(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(48, outGroup));
     for (int ig = 0; ig < 12; ++ig) {
-        vec4 v = loadC3(p, ig);
+        vec4 v = loadC3(p, atlasOrigin(ig, s));
         int wi = ig * 4;
-        sum += mat4(weightAt(ivec2(wi + 0, outGroup)), weightAt(ivec2(wi + 1, outGroup)),
-                     weightAt(ivec2(wi + 2, outGroup)), weightAt(ivec2(wi + 3, outGroup))) * v;
+        vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+        vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+        vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+        vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+        sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
     }
     return sum;
 }
@@ -853,7 +881,8 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = (loadSkip(p, outGroup) + loadC3(p, outGroup)) * tanh(attention(p, outGroup));
+    ivec2 origin = atlasOrigin(outGroup, s);
+    vec4 value = (loadSkip(p, origin) + loadC3(p, origin)) * tanh(attention(p, s, outGroup));
     imageStore(out_image, gid, value);
 }
 
@@ -872,28 +901,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b4_out_raw, atlasCoord(p, group), 0) * span_b4_out_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b4_out_raw, atlasCoord(p, group, s), 0) * span_b4_out_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_5_c1_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -905,7 +935,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -925,28 +955,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b5_c1_relu_raw, atlasCoord(p, group), 0) * span_b5_c1_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b5_c1_relu_raw, atlasCoord(p, group, s), 0) * span_b5_c1_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_5_c2_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -958,7 +989,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     value = max(value, vec4(0.0));
     imageStore(out_image, gid, value);
 }
@@ -978,28 +1009,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_b5_c2_relu_raw, atlasCoord(p, group), 0) * span_b5_c2_relu_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_b5_c2_relu_raw, atlasCoord(p, group, s), 0) * span_b5_c2_relu_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_5_c3_r_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -1011,7 +1043,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     imageStore(out_image, gid, value);
 }
 
@@ -1029,17 +1061,20 @@ void hook() {
 //!COMPUTE 8 8
 
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) { ivec2 s = featureSize(); return p + ivec2(group % 4, group / 4) * s; }
-vec4 loadC3(ivec2 p, int g) { return texelFetch(span_b5_c3_raw, atlasCoord(p, g), 0) * span_b5_c3_mul; }
-vec4 loadSkip(ivec2 p, int g) { return texelFetch(span_b4_out_raw, atlasCoord(p, g), 0) * span_b4_out_mul; }
+ivec2 atlasOrigin(int group, ivec2 s) { return ivec2(group % 4, group / 4) * s; }
+vec4 loadC3(ivec2 p, ivec2 origin) { return texelFetch(span_b5_c3_raw, p + origin, 0) * span_b5_c3_mul; }
+vec4 loadSkip(ivec2 p, ivec2 origin) { return texelFetch(span_b4_out_raw, p + origin, 0) * span_b4_out_mul; }
 vec4 weightAt(ivec2 p) { return texelFetch(W_block_5_att_conv, p, 0); }
-vec4 attention(ivec2 p, int outGroup) {
+vec4 attention(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(48, outGroup));
     for (int ig = 0; ig < 12; ++ig) {
-        vec4 v = loadC3(p, ig);
+        vec4 v = loadC3(p, atlasOrigin(ig, s));
         int wi = ig * 4;
-        sum += mat4(weightAt(ivec2(wi + 0, outGroup)), weightAt(ivec2(wi + 1, outGroup)),
-                     weightAt(ivec2(wi + 2, outGroup)), weightAt(ivec2(wi + 3, outGroup))) * v;
+        vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+        vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+        vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+        vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+        sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
     }
     return sum;
 }
@@ -1049,7 +1084,8 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = (loadSkip(p, outGroup) + loadC3(p, outGroup)) * tanh(attention(p, outGroup));
+    ivec2 origin = atlasOrigin(outGroup, s);
+    vec4 value = (loadSkip(p, origin) + loadC3(p, origin)) * tanh(attention(p, s, outGroup));
     imageStore(out_image, gid, value);
 }
 
@@ -1071,34 +1107,35 @@ void hook() {
 const int KERNEL_H = 1;
 const int KERNEL_W = 1;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
     int source = group / 12;
     int localGroup = group % 12;
-    if (source == 0) return texelFetch(span_stem_raw, atlasCoord(p, localGroup), 0) * span_stem_mul;
-    else if (source == 1) return texelFetch(span_b5_out_raw, atlasCoord(p, localGroup), 0) * span_b5_out_mul;
-    else if (source == 2) return texelFetch(span_b1_out_raw, atlasCoord(p, localGroup), 0) * span_b1_out_mul;
-    else if (source == 3) return texelFetch(span_b5_c1_relu_raw, atlasCoord(p, localGroup), 0) * span_b5_c1_relu_mul;
+    if (source == 0) return texelFetch(span_stem_raw, atlasCoord(p, localGroup, s), 0) * span_stem_mul;
+    else if (source == 1) return texelFetch(span_b5_out_raw, atlasCoord(p, localGroup, s), 0) * span_b5_out_mul;
+    else if (source == 2) return texelFetch(span_b1_out_raw, atlasCoord(p, localGroup, s), 0) * span_b1_out_mul;
+    else if (source == 3) return texelFetch(span_b5_c1_relu_raw, atlasCoord(p, localGroup, s), 0) * span_b5_c1_relu_mul;
     return vec4(0.0);
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_conv_cat, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(192, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 48; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 192 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 48; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 192 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -1110,7 +1147,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     imageStore(out_image, gid, value);
 }
 
@@ -1129,28 +1166,29 @@ void hook() {
 const int KERNEL_H = 3;
 const int KERNEL_W = 3;
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) {
-    ivec2 s = featureSize();
+ivec2 atlasCoord(ivec2 p, int group, ivec2 s) {
     return p + ivec2(group % 4, group / 4) * s;
 }
-vec4 loadInput(ivec2 p, int group) {
-    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, featureSize()))) return vec4(0.0);
-    return texelFetch(span_cat_raw, atlasCoord(p, group), 0) * span_cat_mul;
+vec4 loadInput(ivec2 p, int group, ivec2 s) {
+    return texelFetch(span_cat_raw, atlasCoord(p, group, s), 0) * span_cat_mul;
 }
 vec4 weightAt(ivec2 p) { return texelFetch(W_to_pixel_eval_conv, p, 0); }
-vec4 convolve(ivec2 p, int outGroup) {
+vec4 convolve(ivec2 p, ivec2 s, int outGroup) {
     vec4 sum = weightAt(ivec2(432, outGroup));
     for (int ky = 0; ky < KERNEL_H; ++ky) {
         for (int kx = 0; kx < KERNEL_W; ++kx) {
             ivec2 q = p + ivec2(kx - KERNEL_W / 2, ky - KERNEL_H / 2);
-            for (int ig = 0; ig < 12; ++ig) {
-                vec4 v = loadInput(q, ig);
-                int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
-                vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
-                vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
-                vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
-                vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
-                sum += mat4(w0, w1, w2, w3) * v;
+            bool valid = all(greaterThanEqual(q, ivec2(0))) && all(lessThan(q, s));
+            if (valid) {
+                for (int ig = 0; ig < 12; ++ig) {
+                    vec4 v = loadInput(q, ig, s);
+                    int wi = (ky * KERNEL_W + kx) * 48 + ig * 4;
+                    vec4 w0 = weightAt(ivec2(wi + 0, outGroup));
+                    vec4 w1 = weightAt(ivec2(wi + 1, outGroup));
+                    vec4 w2 = weightAt(ivec2(wi + 2, outGroup));
+                    vec4 w3 = weightAt(ivec2(wi + 3, outGroup));
+                    sum += w0 * v.x + w1 * v.y + w2 * v.z + w3 * v.w;
+                }
             }
         }
     }
@@ -1162,7 +1200,7 @@ void hook() {
     ivec2 s = featureSize();
     ivec2 p = gid % s;
     int outGroup = (gid.y / s.y) * 4 + gid.x / s.x;
-    vec4 value = convolve(p, outGroup);
+    vec4 value = convolve(p, s, outGroup);
     imageStore(out_image, gid, value);
 }
 
@@ -1177,20 +1215,19 @@ void hook() {
 //!COMPUTE 8 8
 
 ivec2 featureSize() { return (ivec2(MAIN_size) + ivec2(1)) / 2; }
-ivec2 atlasCoord(ivec2 p, int group) { ivec2 s = featureSize(); return p + ivec2(group % 4, group / 4) * s; }
-float featureChannel(ivec2 p, int channel) {
-    int group = channel / 4;
-    int lane = channel % 4;
-    return (texelFetch(span_pixel_raw, atlasCoord(p, group), 0) * span_pixel_mul)[lane];
-}
 void hook() {
     ivec2 outPos = ivec2(gl_GlobalInvocationID.xy);
     if (any(greaterThanEqual(outPos, imageSize(out_image)))) return;
+    ivec2 s = featureSize();
     ivec2 p = outPos / 4;
     int phase = (outPos.y % 4) * 4 + (outPos.x % 4);
-    vec3 rgb = vec3(featureChannel(p, phase),
-                    featureChannel(p, 16 + phase),
-                    featureChannel(p, 32 + phase));
+    int group = phase / 4;
+    int lane = phase % 4;
+    ivec2 origin = ivec2(group % 4, group / 4) * s;
+    vec4 rTexel = texelFetch(span_pixel_raw, p + origin, 0) * span_pixel_mul;
+    vec4 gTexel = texelFetch(span_pixel_raw, p + origin + ivec2(0, s.y), 0) * span_pixel_mul;
+    vec4 bTexel = texelFetch(span_pixel_raw, p + origin + ivec2(0, s.y * 2), 0) * span_pixel_mul;
+    vec3 rgb = vec3(rTexel[lane], gTexel[lane], bTexel[lane]);
     rgb = clamp(rgb, vec3(0.0), vec3(1.0));
     imageStore(out_image, outPos, vec4(rgb, 1.0));
 }
